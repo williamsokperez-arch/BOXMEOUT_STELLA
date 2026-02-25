@@ -33,12 +33,12 @@ describe('Validation and Error Handling Integration', () => {
     const response = await request(app)
       .post('/api/test')
       .send({
-        publicKey: 'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ'
+        publicKey: 'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY'
       });
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
-    expect(response.body.data.publicKey).toBe('GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ');
+    expect(response.body.data.publicKey).toBe('GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY');
   });
 
   it('should handle validation error with custom business logic', async () => {
