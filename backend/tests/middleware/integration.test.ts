@@ -28,13 +28,13 @@ describe('Validation and Error Handling Integration', () => {
     app.use(errorHandler);
 
     const response = await request(app).post('/api/test').send({
-      publicKey: 'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ',
+      publicKey: 'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY',
     });
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.data.publicKey).toBe(
-      'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ'
+      'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY'
     );
   });
 

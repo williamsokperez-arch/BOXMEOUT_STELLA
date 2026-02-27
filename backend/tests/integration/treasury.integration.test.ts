@@ -140,7 +140,7 @@ describe('Treasury API Integration Tests', () => {
 
       const marketId = '123e4567-e89b-12d3-a456-426614174000';
       const creatorAddress =
-        'GCREATORTEST12345678901234567890123456789012345678901234'; // 56 chars
+        'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY'; // Valid 56 chars
 
       const response = await request(app)
         .post('/api/treasury/distribute-creator')

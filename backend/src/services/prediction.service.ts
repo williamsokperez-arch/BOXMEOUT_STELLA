@@ -15,6 +15,7 @@ import {
   notifyWinningsClaimed,
   notifyBalanceUpdated,
 } from '../websocket/realtime.js';
+import {
   marketBlockchainService,
   MarketBlockchainService,
 } from './blockchain/market.js';

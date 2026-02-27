@@ -8,6 +8,7 @@ import {
   NotificationService,
 } from './notification.service.js';
 import { logger } from '../utils/logger.js';
+import { stripHtml } from '../schemas/validation.schemas.js';
 
 export class UserService {
   private userRepository: UserRepository;
@@ -112,15 +113,25 @@ export class UserService {
       avatarUrl?: string;
     }
   ) {
+    // Sanitize inputs
+    const sanitizedData = { ...data };
+    if (sanitizedData.username)
+      sanitizedData.username = stripHtml(sanitizedData.username);
+    if (sanitizedData.displayName)
+      sanitizedData.displayName = stripHtml(sanitizedData.displayName);
+    if (sanitizedData.bio) sanitizedData.bio = stripHtml(sanitizedData.bio);
+
     // Check username uniqueness if changing
-    if (data.username) {
-      const existing = await this.userRepository.findByUsername(data.username);
+    if (sanitizedData.username) {
+      const existing = await this.userRepository.findByUsername(
+        sanitizedData.username
+      );
       if (existing && existing.id !== userId) {
         throw new Error('Username already taken');
       }
     }
 
-    const user = await this.userRepository.update(userId, data);
+    const user = await this.userRepository.update(userId, sanitizedData);
     const { passwordHash: _, twoFaSecret: __, ...userWithoutSensitive } = user;
     return userWithoutSensitive;
   }

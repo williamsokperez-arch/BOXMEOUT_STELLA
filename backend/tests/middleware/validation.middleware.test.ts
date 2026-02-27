@@ -28,13 +28,13 @@ describe('Validation Middleware', () => {
       app.use(errorHandler);
 
       const response = await request(app).post('/challenge').send({
-        publicKey: 'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ',
+        publicKey: 'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY',
       });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.data.publicKey).toBe(
-        'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ'
+        'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY'
       );
     });
 
@@ -74,7 +74,7 @@ describe('Validation Middleware', () => {
       app.use(errorHandler);
 
       const response = await request(app).post('/login').send({
-        publicKey: 'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ',
+        publicKey: 'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY',
         signature: 'test-signature',
         nonce: 'test-nonce',
       });
@@ -90,7 +90,7 @@ describe('Validation Middleware', () => {
       app.use(errorHandler);
 
       const response = await request(app).post('/login').send({
-        publicKey: 'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ',
+        publicKey: 'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY',
         signature: '',
         nonce: 'test-nonce',
       });
@@ -210,13 +210,13 @@ describe('Validation Middleware', () => {
       app.use(errorHandler);
 
       const response = await request(app).post('/verify').send({
-        address: 'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ',
+        address: 'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY',
       });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.data.address).toBe(
-        'GA5XIGA5C7QTPTWXQHY6MCJRMTRZDOSHR6EFIBNDQTCQHG262N4GGKXQ'
+        'GAMCVGJFOWWCF6N7YSS66DEZQSCGWZU2SCOWIA2NTMCKTODDTPUOOYDY'
       );
     });
 

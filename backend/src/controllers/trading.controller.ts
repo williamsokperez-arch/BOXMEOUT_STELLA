@@ -25,19 +25,11 @@ export class TradingController {
       const marketId = req.params.marketId as string;
       const { outcome, amount, minShares } = req.body;
 
-      // Validation
-      if (outcome === undefined || !amount) {
-        res
-          .status(400)
-          .json({ success: false, error: 'Missing outcome or amount' });
-        return;
-      }
-
       const xdr = await tradingService.buildBuySharesTx(
         userId,
         userPublicKey,
         marketId,
-        Number(outcome),
+        outcome,
         BigInt(amount),
         BigInt(minShares || 0)
       );
@@ -71,47 +63,13 @@ export class TradingController {
       const marketId = req.params.marketId as string;
       const { outcome, amount, minShares } = req.body;
 
-      // Validate input
-      if (outcome === undefined || outcome === null) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'outcome is required (0 for NO, 1 for YES)',
-          },
-        });
-        return;
-      }
-
-      if (!amount || amount <= 0) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'amount must be greater than 0',
-          },
-        });
-        return;
-      }
-
-      if (![0, 1].includes(outcome)) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'outcome must be 0 (NO) or 1 (YES)',
-          },
-        });
-        return;
-      }
-
       // Call service
       const result = await tradingService.buyShares({
         userId,
         marketId,
         outcome,
-        amount,
-        minShares,
+        amount: Number(amount),
+        minShares: minShares ? Number(minShares) : undefined,
       });
 
       res.status(201).json({
@@ -179,18 +137,11 @@ export class TradingController {
       const marketId = req.params.marketId as string;
       const { outcome, shares, minPayout } = req.body;
 
-      if (outcome === undefined || !shares) {
-        res
-          .status(400)
-          .json({ success: false, error: 'Missing outcome or shares' });
-        return;
-      }
-
       const xdr = await tradingService.buildSellSharesTx(
         userId,
         userPublicKey,
         marketId,
-        Number(outcome),
+        outcome,
         BigInt(shares),
         BigInt(minPayout || 0)
       );
@@ -224,47 +175,13 @@ export class TradingController {
       const marketId = req.params.marketId as string;
       const { outcome, shares, minPayout } = req.body;
 
-      // Validate input
-      if (outcome === undefined || outcome === null) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'outcome is required (0 for NO, 1 for YES)',
-          },
-        });
-        return;
-      }
-
-      if (!shares || shares <= 0) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'shares must be greater than 0',
-          },
-        });
-        return;
-      }
-
-      if (![0, 1].includes(outcome)) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'outcome must be 0 (NO) or 1 (YES)',
-          },
-        });
-        return;
-      }
-
       // Call service
       const result = await tradingService.sellShares({
         userId,
         marketId,
         outcome,
-        shares,
-        minPayout,
+        shares: Number(shares),
+        minPayout: minPayout ? Number(minPayout) : undefined,
       });
 
       res.status(200).json({
@@ -425,46 +342,10 @@ export class TradingController {
       const marketId = req.params.marketId as string;
       const { usdcAmount } = req.body;
 
-      if (!usdcAmount) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'usdcAmount is required',
-          },
-        });
-        return;
-      }
-
-      let parsedAmount: bigint;
-      try {
-        parsedAmount = BigInt(usdcAmount);
-      } catch {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'usdcAmount must be a valid integer string',
-          },
-        });
-        return;
-      }
-
-      if (parsedAmount <= BigInt(0)) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'usdcAmount must be greater than 0',
-          },
-        });
-        return;
-      }
-
       const result = await tradingService.addLiquidity(
         userId,
         marketId,
-        parsedAmount
+        BigInt(usdcAmount)
       );
 
       res.status(200).json({
@@ -521,46 +402,10 @@ export class TradingController {
       const marketId = req.params.marketId as string;
       const { lpTokens } = req.body;
 
-      if (!lpTokens) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'lpTokens is required',
-          },
-        });
-        return;
-      }
-
-      let parsedTokens: bigint;
-      try {
-        parsedTokens = BigInt(lpTokens);
-      } catch {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'lpTokens must be a valid integer string',
-          },
-        });
-        return;
-      }
-
-      if (parsedTokens <= BigInt(0)) {
-        res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'lpTokens must be greater than 0',
-          },
-        });
-        return;
-      }
-
       const result = await tradingService.removeLiquidity(
         userId,
         marketId,
-        parsedTokens
+        BigInt(lpTokens)
       );
 
       res.status(200).json({

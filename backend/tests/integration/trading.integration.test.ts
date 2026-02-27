@@ -89,7 +89,7 @@ describe('Trading API - User-Signed Transaction Flow', () => {
     it('should return unsigned XDR for a valid market', async () => {
       // Mock market
       vi.mocked(prisma.market.findUnique).mockResolvedValue({
-        id: 'market-1',
+        id: '123e4567-e89b-12d3-a456-426614174001',
         status: MarketStatus.OPEN,
       } as any);
 
@@ -99,7 +99,7 @@ describe('Trading API - User-Signed Transaction Flow', () => {
       );
 
       const response = await request(app)
-        .post('/api/markets/market-1/build-tx/buy')
+        .post('/api/markets/123e4567-e89b-12d3-a456-426614174001/build-tx/buy')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           outcome: 1,
@@ -113,7 +113,7 @@ describe('Trading API - User-Signed Transaction Flow', () => {
 
       // Verify it called AMM with the user's public key from the JWT
       expect(ammService.buildBuySharesTx).toHaveBeenCalledWith('GUSER123', {
-        marketId: 'market-1',
+        marketId: '123e4567-e89b-12d3-a456-426614174001',
         outcome: 1,
         amountUsdc: BigInt(1000),
         minShares: BigInt(900),
@@ -122,12 +122,12 @@ describe('Trading API - User-Signed Transaction Flow', () => {
 
     it('should fail if market is not OPEN', async () => {
       vi.mocked(prisma.market.findUnique).mockResolvedValue({
-        id: 'market-1',
+        id: '123e4567-e89b-12d3-a456-426614174001',
         status: MarketStatus.CLOSED,
       } as any);
 
       const response = await request(app)
-        .post('/api/markets/market-1/build-tx/buy')
+        .post('/api/markets/123e4567-e89b-12d3-a456-426614174001/build-tx/buy')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
           outcome: 1,
@@ -193,7 +193,7 @@ describe('Trading API - Direct Buy Flow', () => {
   it('should buy shares successfully with valid data', async () => {
     // Mock market (OPEN)
     vi.mocked(prisma.market.findUnique).mockResolvedValue({
-      id: 'test-market-id',
+      id: '123e4567-e89b-12d3-a456-426614174000',
       contractAddress: 'contract',
       title: 'Test Market',
       status: MarketStatus.OPEN,
@@ -236,12 +236,12 @@ describe('Trading API - Direct Buy Flow', () => {
     } as any);
 
     const response = await request(app)
-      .post('/api/markets/test-market-id/buy')
+      .post('/api/markets/123e4567-e89b-12d3-a456-426614174000/buy')
       .set('Authorization', `Bearer ${authToken}`)
       .send({
         outcome: 1,
-        amount: 100,
-        minShares: 90,
+        amount: '100',
+        minShares: '90',
       })
       .expect(201);
 
@@ -254,7 +254,7 @@ describe('Trading API - Direct Buy Flow', () => {
 
     // Verify AMM was called correctly
     expect(ammService.buyShares).toHaveBeenCalledWith({
-      marketId: 'test-market-id',
+      marketId: '123e4567-e89b-12d3-a456-426614174000',
       outcome: 1,
       amountUsdc: 100,
       minShares: 90,
@@ -263,7 +263,7 @@ describe('Trading API - Direct Buy Flow', () => {
 
   it('should reject buy with insufficient balance', async () => {
     vi.mocked(prisma.market.findUnique).mockResolvedValue({
-      id: 'test-market-id',
+      id: '123e4567-e89b-12d3-a456-426614174000',
       status: MarketStatus.OPEN,
     } as any);
 
@@ -273,11 +273,11 @@ describe('Trading API - Direct Buy Flow', () => {
     } as any);
 
     const response = await request(app)
-      .post('/api/markets/test-market-id/buy')
+      .post('/api/markets/123e4567-e89b-12d3-a456-426614174000/buy')
       .set('Authorization', `Bearer ${authToken}`)
       .send({
         outcome: 1,
-        amount: 100,
+        amount: '100',
       })
       .expect(400);
 
@@ -291,16 +291,16 @@ describe('Trading API - Direct Buy Flow', () => {
 
   it('should reject buy with invalid market (CLOSED)', async () => {
     vi.mocked(prisma.market.findUnique).mockResolvedValue({
-      id: 'test-market-id',
+      id: '123e4567-e89b-12d3-a456-426614174000',
       status: MarketStatus.CLOSED,
     } as any);
 
     const response = await request(app)
-      .post('/api/markets/test-market-id/buy')
+      .post('/api/markets/123e4567-e89b-12d3-a456-426614174000/buy')
       .set('Authorization', `Bearer ${authToken}`)
       .send({
         outcome: 1,
-        amount: 100,
+        amount: '100',
       })
       .expect(400);
 
@@ -323,7 +323,7 @@ describe('Trading API - Direct Sell Flow', () => {
 
   it('should sell shares successfully with valid data', async () => {
     vi.mocked(prisma.market.findUnique).mockResolvedValue({
-      id: 'test-market-id',
+      id: '123e4567-e89b-12d3-a456-426614174000',
     } as any);
 
     // Mock user has shares
@@ -367,12 +367,12 @@ describe('Trading API - Direct Sell Flow', () => {
     } as any);
 
     const response = await request(app)
-      .post('/api/markets/test-market-id/sell')
+      .post('/api/markets/123e4567-e89b-12d3-a456-426614174000/sell')
       .set('Authorization', `Bearer ${authToken}`)
       .send({
         outcome: 1,
-        shares: 50,
-        minPayout: 48,
+        shares: '50',
+        minPayout: '48',
       })
       .expect(200);
 
@@ -382,7 +382,7 @@ describe('Trading API - Direct Sell Flow', () => {
     expect(response.body.data).toHaveProperty('txHash');
 
     expect(ammService.sellShares).toHaveBeenCalledWith({
-      marketId: 'test-market-id',
+      marketId: '123e4567-e89b-12d3-a456-426614174000',
       outcome: 1,
       shares: 50,
       minPayout: 48,
@@ -403,7 +403,7 @@ describe('Trading API - Odds & Liquidity', () => {
 
   it('should return odds successfully', async () => {
     vi.mocked(prisma.market.findUnique).mockResolvedValue({
-      id: 'test-market-id',
+      id: '123e4567-e89b-12d3-a456-426614174000',
     } as any);
 
     vi.mocked(ammService.getOdds).mockResolvedValue({
@@ -417,7 +417,7 @@ describe('Trading API - Odds & Liquidity', () => {
     });
 
     const response = await request(app)
-      .get('/api/markets/test-market-id/odds')
+      .get('/api/markets/123e4567-e89b-12d3-a456-426614174000/odds')
       .expect(200);
 
     expect(response.body.success).toBe(true);
@@ -428,7 +428,7 @@ describe('Trading API - Odds & Liquidity', () => {
 
   it('should add liquidity successfully', async () => {
     vi.mocked(prisma.market.findUnique).mockResolvedValue({
-      id: 'test-market-id',
+      id: '123e4567-e89b-12d3-a456-426614174000',
       status: MarketStatus.OPEN,
     } as any);
 
@@ -438,10 +438,14 @@ describe('Trading API - Odds & Liquidity', () => {
     });
 
     const response = await request(app)
-      .post('/api/markets/test-market-id/liquidity/add')
+      .post('/api/markets/123e4567-e89b-12d3-a456-426614174000/liquidity/add')
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ usdcAmount: '1000' })
-      .expect(200);
+      .send({ usdcAmount: '1000' });
+
+    if (response.status !== 200) {
+      console.log('DEBUG addLiquidity failure:', JSON.stringify(response.body, null, 2));
+    }
+    expect(response.status).toBe(200);
 
     expect(response.body.success).toBe(true);
     expect(response.body.data).toHaveProperty('lpTokensMinted', '500');
@@ -453,7 +457,7 @@ describe('Trading API - Odds & Liquidity', () => {
 
   it('should remove liquidity successfully', async () => {
     vi.mocked(prisma.market.findUnique).mockResolvedValue({
-      id: 'test-market-id',
+      id: '123e4567-e89b-12d3-a456-426614174000',
       status: MarketStatus.OPEN,
     } as any);
 
@@ -465,7 +469,7 @@ describe('Trading API - Odds & Liquidity', () => {
     });
 
     const response = await request(app)
-      .post('/api/markets/test-market-id/liquidity/remove')
+      .post('/api/markets/123e4567-e89b-12d3-a456-426614174000/liquidity/remove')
       .set('Authorization', `Bearer ${authToken}`)
       .send({ lpTokens: '500' })
       .expect(200);
