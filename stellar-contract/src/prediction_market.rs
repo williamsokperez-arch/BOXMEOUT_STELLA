@@ -711,7 +711,7 @@ impl PredictionMarketContract {
 
         // Betting time must not have passed
         if market.betting_close_time <= env.ledger().timestamp() {
-            return Err(PredictionMarketError::ResolutionDeadlinePassed); // Use appropriate error for betting closed
+            return Err(PredictionMarketError::BettingClosed);
         }
 
         market.status = crate::types::MarketStatus::Open;
@@ -981,7 +981,45 @@ impl PredictionMarketContract {
         env: Env,
         market_id: u64,
     ) -> Result<i128, PredictionMarketError> {
-        todo!("Implement creator fee collection")
+        // Load market
+        let mut market: Market = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Market(market_id))
+            .ok_or(PredictionMarketError::MarketNotFound)?;
+
+        // Require market creator auth
+        market.creator.require_auth();
+
+        // Market must be Resolved or Cancelled
+        if market.status != MarketStatus::Resolved && market.status != MarketStatus::Cancelled {
+            return Err(PredictionMarketError::AlreadyResolved);
+        }
+
+        // Check if there are fees to collect
+        if market.creator_fee_pool <= 0 {
+            return Err(PredictionMarketError::NoFeesToCollect);
+        }
+
+        let amount = market.creator_fee_pool;
+
+        // Load config for token transfer
+        let config = load_config(&env)?;
+
+        // Transfer creator fees to creator
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &config.token);
+        token_client.transfer(&env.current_contract_address(), &market.creator, &amount);
+
+        // Zero out creator fee pool
+        market.creator_fee_pool = 0;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Market(market_id), &market);
+
+        // Emit event
+        events::creator_fees_collected(&env, market_id, market.creator, amount);
+
+        Ok(amount)
     }
 
     // =========================================================================

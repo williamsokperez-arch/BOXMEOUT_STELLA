@@ -440,5 +440,9 @@ pub fn protocol_fees_collected(env: &Env, market_id: u64, treasury: Address, amo
 /// - Topics: [symbol!("creator_fees"), market_id as Symbol]
 /// - Data:   (market_id: u64, creator: Address, amount: i128)
 pub fn creator_fees_collected(env: &Env, market_id: u64, creator: Address, amount: i128) {
-    todo!("Emit creator_fees_collected event")
+    #[allow(deprecated)]
+    env.events().publish(
+        (Symbol::new(env, "creator_fees"), market_id),
+        (market_id, creator, amount),
+    );
 }
