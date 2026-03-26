@@ -426,7 +426,11 @@ pub fn liquidity_removed(
 /// - Topics: [symbol!("lp_fees"), market_id as Symbol]
 /// - Data:   (market_id: u64, provider: Address, fees_claimed: i128)
 pub fn lp_fees_claimed(env: &Env, market_id: u64, provider: Address, fees_claimed: i128) {
-    todo!("Emit lp_fees_claimed event")
+    #[allow(deprecated)]
+    env.events().publish(
+        (Symbol::new(env, "lp_fees"), market_id),
+        (market_id, provider, fees_claimed),
+    );
 }
 
 /// Emitted when the protocol treasury collects its fees from a resolved market.

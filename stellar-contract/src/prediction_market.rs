@@ -949,7 +949,88 @@ impl PredictionMarketContract {
         provider: Address,
         market_id: u64,
     ) -> Result<i128, PredictionMarketError> {
-        todo!("Implement LP fee claim using dividend-per-share pattern")
+        // Require provider auth
+        provider.require_auth();
+
+        // Load LP position
+        let position_key = DataKey::LpPosition(market_id, provider.clone());
+        let position: LpPosition = env
+            .storage()
+            .persistent()
+            .get(&position_key)
+            .ok_or(PredictionMarketError::LpPositionNotFound)?;
+
+        // Get global LP fee per share
+        let global_fee_per_share: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LpFeePerShare(market_id))
+            .unwrap_or(0);
+
+        // Get provider's fee debt (last claimed snapshot)
+        let fee_debt: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LpFeeDebt(market_id, provider.clone()))
+            .unwrap_or(0);
+
+        // Calculate claimable fees using dividend-per-share pattern
+        // claimable = lp_shares * (global_fee_per_share - fee_debt) / SCALE
+        let fee_diff = global_fee_per_share
+            .checked_sub(fee_debt)
+            .ok_or(PredictionMarketError::ArithmeticError)?;
+
+        if fee_diff <= 0 {
+            return Err(PredictionMarketError::NoFeesToCollect);
+        }
+
+        let claimable = position
+            .lp_shares
+            .checked_mul(fee_diff)
+            .and_then(|x| x.checked_div(crate::math::SCALE))
+            .ok_or(PredictionMarketError::ArithmeticError)?;
+
+        if claimable <= 0 {
+            return Err(PredictionMarketError::NoFeesToCollect);
+        }
+
+        // Load market to update fee pool
+        let mut market: Market = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Market(market_id))
+            .ok_or(PredictionMarketError::MarketNotFound)?;
+
+        // Validate sufficient fees in pool
+        if market.lp_fee_pool < claimable {
+            return Err(PredictionMarketError::NoFeesToCollect);
+        }
+
+        // Load config for token transfer
+        let config = load_config(&env)?;
+
+        // Transfer fees to provider
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &config.token);
+        token_client.transfer(&env.current_contract_address(), &provider, &claimable);
+
+        // Update LP fee debt to current global fee per share
+        env.storage()
+            .persistent()
+            .set(&DataKey::LpFeeDebt(market_id, provider.clone()), &global_fee_per_share);
+
+        // Decrement market LP fee pool
+        market.lp_fee_pool = market
+            .lp_fee_pool
+            .checked_sub(claimable)
+            .ok_or(PredictionMarketError::ArithmeticError)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Market(market_id), &market);
+
+        // Emit event
+        events::lp_fees_claimed(&env, market_id, provider, claimable);
+
+        Ok(claimable)
     }
 
     /// Admin collects the accumulated protocol fees for a specific market.
