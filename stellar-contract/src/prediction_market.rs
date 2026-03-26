@@ -4,12 +4,19 @@ use crate::errors::PredictionMarketError;
 use crate::storage::DataKey;
 use crate::types::{
     AmmPool, Config, Dispute, FeeConfig, LpPosition, Market, MarketMetadata, MarketStats,
-    OracleReport, TradeReceipt, UserPosition,
+    MarketStatus, OracleReport, Outcome, TradeReceipt, UserPosition,
 };
 use crate::events;
 
 #[contract]
 pub struct PredictionMarketContract;
+
+const MIN_DISPUTE_WINDOW_SECS: u64 = 3_600;
+const MAX_CATEGORY_LEN: u32 = 32;
+const MAX_TAGS_LEN: u32 = 128;
+const MAX_IMAGE_URL_LEN: u32 = 256;
+const MAX_DESCRIPTION_LEN: u32 = 1_024;
+const MAX_SOURCE_URL_LEN: u32 = 256;
 
 fn load_config(env: &Env) -> Result<Config, PredictionMarketError> {
     env.storage()
@@ -32,6 +39,109 @@ fn validate_fee_config(fee_config: &FeeConfig) -> Result<(), PredictionMarketErr
     }
 
     Ok(())
+}
+
+fn is_operator_address(env: &Env, address: &Address) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::IsOperator(address.clone()))
+        .unwrap_or(false)
+}
+
+fn assert_admin_or_operator(
+    env: &Env,
+    config: &Config,
+    caller: &Address,
+) -> Result<(), PredictionMarketError> {
+    caller.require_auth();
+
+    if *caller != config.admin && !is_operator_address(env, caller) {
+        return Err(PredictionMarketError::Unauthorized);
+    }
+
+    Ok(())
+}
+
+fn is_emergency_paused(env: &Env, config: &Config) -> bool {
+    env.storage()
+        .persistent()
+        .get(&DataKey::EmergencyPause)
+        .unwrap_or(config.emergency_paused)
+}
+
+fn validate_metadata(metadata: &MarketMetadata) -> Result<(), PredictionMarketError> {
+    if metadata.category.len() > MAX_CATEGORY_LEN
+        || metadata.tags.len() > MAX_TAGS_LEN
+        || metadata.image_url.len() > MAX_IMAGE_URL_LEN
+        || metadata.description.len() > MAX_DESCRIPTION_LEN
+        || metadata.source_url.len() > MAX_SOURCE_URL_LEN
+    {
+        return Err(PredictionMarketError::MetadataTooLong);
+    }
+
+    Ok(())
+}
+
+fn validate_outcome_labels(
+    outcome_labels: &Vec<String>,
+    max_outcomes: u32,
+) -> Result<(), PredictionMarketError> {
+    let outcome_count = outcome_labels.len();
+    if outcome_count < 2 {
+        return Err(PredictionMarketError::TooFewOutcomes);
+    }
+    if outcome_count > max_outcomes {
+        return Err(PredictionMarketError::TooManyOutcomes);
+    }
+
+    let mut i = 0;
+    while i < outcome_count {
+        let current_label = outcome_labels.get_unchecked(i);
+        let mut j = i + 1;
+        while j < outcome_count {
+            if current_label == outcome_labels.get_unchecked(j) {
+                return Err(PredictionMarketError::DuplicateOutcomeLabel);
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+
+    Ok(())
+}
+
+fn build_outcomes(env: &Env, outcome_labels: &Vec<String>) -> Vec<Outcome> {
+    let mut outcomes = Vec::new(env);
+    let mut outcome_id = 0;
+
+    while outcome_id < outcome_labels.len() {
+        outcomes.push_back(Outcome {
+            id: outcome_id,
+            label: outcome_labels.get_unchecked(outcome_id),
+            total_shares_outstanding: 0,
+        });
+        outcome_id += 1;
+    }
+
+    outcomes
+}
+
+fn allocate_market_id(env: &Env) -> Result<u64, PredictionMarketError> {
+    let next_market_id = env
+        .storage()
+        .persistent()
+        .get(&DataKey::NextMarketId)
+        .unwrap_or(1_u64);
+
+    let following_market_id = next_market_id
+        .checked_add(1)
+        .ok_or(PredictionMarketError::ArithmeticError)?;
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::NextMarketId, &following_market_id);
+
+    Ok(next_market_id)
 }
 
 #[contractimpl]
@@ -229,7 +339,80 @@ impl PredictionMarketContract {
         outcome_labels: Vec<String>,
         metadata: MarketMetadata,
     ) -> Result<u64, PredictionMarketError> {
-        todo!("Implement full market creation")
+        let config = load_config(&env)?;
+        if is_emergency_paused(&env, &config) {
+            return Err(PredictionMarketError::EmergencyPaused);
+        }
+
+        assert_admin_or_operator(&env, &config, &creator)?;
+
+        let now = env.ledger().timestamp();
+        if betting_close_time <= now || resolution_deadline <= betting_close_time {
+            return Err(PredictionMarketError::InvalidTimestamp);
+        }
+
+        let market_duration = resolution_deadline
+            .checked_sub(now)
+            .ok_or(PredictionMarketError::InvalidTimestamp)?;
+        if market_duration > config.max_market_duration_secs {
+            return Err(PredictionMarketError::InvalidTimestamp);
+        }
+
+        validate_outcome_labels(&outcome_labels, config.max_outcomes)?;
+
+        if dispute_window_secs < MIN_DISPUTE_WINDOW_SECS {
+            return Err(PredictionMarketError::InvalidTimestamp);
+        }
+
+        validate_metadata(&metadata)?;
+
+        let market_id = allocate_market_id(&env)?;
+        let outcomes = build_outcomes(&env, &outcome_labels);
+
+        let market = Market {
+            market_id,
+            creator: creator.clone(),
+            question: question.clone(),
+            betting_close_time,
+            resolution_deadline,
+            dispute_window_secs,
+            outcomes,
+            status: MarketStatus::Initializing,
+            winning_outcome_id: None,
+            protocol_fee_pool: 0,
+            lp_fee_pool: 0,
+            creator_fee_pool: 0,
+            total_collateral: 0,
+            total_lp_shares: 0,
+            metadata,
+        };
+
+        let stats = MarketStats {
+            market_id,
+            total_volume: 0,
+            volume_24h: 0,
+            last_trade_at: 0,
+            unique_traders: 0,
+            open_interest: 0,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Market(market_id), &market);
+        env.storage()
+            .persistent()
+            .set(&DataKey::MarketStats(market_id), &stats);
+
+        events::market_created(
+            &env,
+            market_id,
+            creator,
+            question,
+            betting_close_time,
+            resolution_deadline,
+        );
+
+        Ok(market_id)
     }
 
     /// Update the metadata (category, tags, image, description, source) of an existing market.
@@ -959,9 +1142,11 @@ mod tests {
     use super::{PredictionMarketContract, PredictionMarketContractClient};
     use crate::errors::PredictionMarketError;
     use crate::storage::DataKey;
-    use crate::types::{Config, FeeConfig};
-    use soroban_sdk::testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Events as _};
-    use soroban_sdk::{vec, Address, Env, IntoVal, Symbol};
+    use crate::types::{Config, FeeConfig, Market, MarketMetadata, MarketStats, MarketStatus};
+    use soroban_sdk::testutils::{
+        Address as _, AuthorizedFunction, AuthorizedInvocation, Events as _, Ledger as _,
+    };
+    use soroban_sdk::{vec, Address, Env, IntoVal, String as SorobanString, Symbol, Vec as SorobanVec};
 
     fn sample_config(env: &Env, admin: &Address) -> Config {
         Config {
@@ -989,6 +1174,30 @@ mod tests {
         });
     }
 
+    fn seed_next_market_id(env: &Env, contract_id: &Address, next_market_id: u64) {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&DataKey::NextMarketId, &next_market_id);
+        });
+    }
+
+    fn seed_emergency_pause(env: &Env, contract_id: &Address, paused: bool) {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&DataKey::EmergencyPause, &paused);
+        });
+    }
+
+    fn seed_operator(env: &Env, contract_id: &Address, operator: &Address) {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&DataKey::IsOperator(operator.clone()), &true);
+        });
+    }
+
     fn read_config(env: &Env, contract_id: &Address) -> Config {
         env.as_contract(contract_id, || {
             env.storage()
@@ -996,6 +1205,51 @@ mod tests {
                 .get(&DataKey::Config)
                 .expect("config should exist")
         })
+    }
+
+    fn read_market(env: &Env, contract_id: &Address, market_id: u64) -> Market {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&DataKey::Market(market_id))
+                .expect("market should exist")
+        })
+    }
+
+    fn read_market_stats(env: &Env, contract_id: &Address, market_id: u64) -> MarketStats {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&DataKey::MarketStats(market_id))
+                .expect("market stats should exist")
+        })
+    }
+
+    fn read_next_market_id(env: &Env, contract_id: &Address) -> u64 {
+        env.as_contract(contract_id, || {
+            env.storage()
+                .persistent()
+                .get(&DataKey::NextMarketId)
+                .expect("next market id should exist")
+        })
+    }
+
+    fn sample_metadata(env: &Env) -> MarketMetadata {
+        MarketMetadata {
+            category: SorobanString::from_str(env, "sports"),
+            tags: SorobanString::from_str(env, "wrestling,ppv"),
+            image_url: SorobanString::from_str(env, "https://example.com/image.png"),
+            description: SorobanString::from_str(env, "Title match prediction market."),
+            source_url: SorobanString::from_str(env, "https://example.com/source"),
+        }
+    }
+
+    fn sample_outcomes(env: &Env) -> SorobanVec<SorobanString> {
+        vec![
+            env,
+            SorobanString::from_str(env, "Wrestler A"),
+            SorobanString::from_str(env, "Wrestler B")
+        ]
     }
 
     #[test]
@@ -1073,5 +1327,334 @@ mod tests {
         assert_eq!(stored.fee_config.lp_fee_bps, 200);
         assert_eq!(stored.fee_config.creator_fee_bps, 50);
         assert_eq!(env.events().all(), vec![&env]);
+    }
+
+    #[test]
+    fn create_market_allows_admin_and_initializes_market_state() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000);
+
+        let contract_id = env.register(PredictionMarketContract, ());
+        let client = PredictionMarketContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let config = sample_config(&env, &admin);
+
+        seed_config(&env, &contract_id, &config);
+        seed_next_market_id(&env, &contract_id, 41);
+        seed_emergency_pause(&env, &contract_id, false);
+
+        let question = SorobanString::from_str(&env, "Who wins the main event?");
+        let metadata = sample_metadata(&env);
+        let outcome_labels = sample_outcomes(&env);
+        let betting_close_time = 1_600_u64;
+        let resolution_deadline = 2_000_u64;
+        let dispute_window_secs = 3_600_u64;
+
+        env.mock_all_auths();
+        let market_id = client.create_market(
+            &admin,
+            &question,
+            &betting_close_time,
+            &resolution_deadline,
+            &dispute_window_secs,
+            &outcome_labels,
+            &metadata,
+        );
+
+        assert_eq!(market_id, 41);
+        assert_eq!(
+            env.auths(),
+            std::vec![(
+                admin.clone(),
+                AuthorizedInvocation {
+                    function: AuthorizedFunction::Contract((
+                        contract_id.clone(),
+                        Symbol::new(&env, "create_market"),
+                        (
+                            &admin,
+                            &question,
+                            betting_close_time,
+                            resolution_deadline,
+                            dispute_window_secs,
+                            &outcome_labels,
+                            &metadata,
+                        )
+                            .into_val(&env),
+                    )),
+                    sub_invocations: std::vec![],
+                }
+            )]
+        );
+        assert_eq!(
+            env.events().all(),
+            vec![&env, (
+                contract_id.clone(),
+                vec![
+                    &env,
+                    Symbol::new(&env, "mkt_created").into_val(&env),
+                    market_id.into_val(&env)
+                ],
+                (
+                    market_id,
+                    admin.clone(),
+                    question.clone(),
+                    betting_close_time,
+                    resolution_deadline,
+                )
+                    .into_val(&env),
+            )]
+        );
+
+        let market = read_market(&env, &contract_id, market_id);
+        assert_eq!(market.market_id, 41);
+        assert_eq!(market.creator, admin);
+        assert_eq!(market.question, question);
+        assert_eq!(market.betting_close_time, betting_close_time);
+        assert_eq!(market.resolution_deadline, resolution_deadline);
+        assert_eq!(market.dispute_window_secs, dispute_window_secs);
+        assert_eq!(market.status, MarketStatus::Initializing);
+        assert!(market.winning_outcome_id.is_none());
+        assert_eq!(market.protocol_fee_pool, 0);
+        assert_eq!(market.lp_fee_pool, 0);
+        assert_eq!(market.creator_fee_pool, 0);
+        assert_eq!(market.total_collateral, 0);
+        assert_eq!(market.total_lp_shares, 0);
+        assert_eq!(market.outcomes.len(), 2);
+        let first_outcome = market.outcomes.get_unchecked(0);
+        assert_eq!(first_outcome.id, 0);
+        assert_eq!(first_outcome.label, SorobanString::from_str(&env, "Wrestler A"));
+        assert_eq!(first_outcome.total_shares_outstanding, 0);
+        let second_outcome = market.outcomes.get_unchecked(1);
+        assert_eq!(second_outcome.id, 1);
+        assert_eq!(second_outcome.label, SorobanString::from_str(&env, "Wrestler B"));
+        assert_eq!(second_outcome.total_shares_outstanding, 0);
+
+        let stats = read_market_stats(&env, &contract_id, market_id);
+        assert_eq!(stats.market_id, market_id);
+        assert_eq!(stats.total_volume, 0);
+        assert_eq!(stats.volume_24h, 0);
+        assert_eq!(stats.last_trade_at, 0);
+        assert_eq!(stats.unique_traders, 0);
+        assert_eq!(stats.open_interest, 0);
+
+        assert_eq!(read_next_market_id(&env, &contract_id), 42);
+    }
+
+    #[test]
+    fn create_market_allows_operator_role() {
+        let env = Env::default();
+        env.ledger().set_timestamp(500);
+
+        let contract_id = env.register(PredictionMarketContract, ());
+        let client = PredictionMarketContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        let config = sample_config(&env, &admin);
+
+        seed_config(&env, &contract_id, &config);
+        seed_operator(&env, &contract_id, &operator);
+
+        let question = SorobanString::from_str(&env, "Operator-created market");
+        let metadata = sample_metadata(&env);
+        let outcome_labels = sample_outcomes(&env);
+
+        env.mock_all_auths();
+        let market_id = client.create_market(
+            &operator,
+            &question,
+            &800_u64,
+            &1_000_u64,
+            &3_600_u64,
+            &outcome_labels,
+            &metadata,
+        );
+
+        assert_eq!(market_id, 1);
+        let market = read_market(&env, &contract_id, market_id);
+        assert_eq!(market.creator, operator);
+        assert_eq!(market.status, MarketStatus::Initializing);
+    }
+
+    #[test]
+    fn create_market_rejects_non_admin_non_operator() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000);
+
+        let contract_id = env.register(PredictionMarketContract, ());
+        let client = PredictionMarketContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let outsider = Address::generate(&env);
+        let config = sample_config(&env, &admin);
+
+        seed_config(&env, &contract_id, &config);
+
+        env.mock_all_auths();
+        let result = client.try_create_market(
+            &outsider,
+            &SorobanString::from_str(&env, "Unauthorized market"),
+            &1_500_u64,
+            &2_000_u64,
+            &3_600_u64,
+            &sample_outcomes(&env),
+            &sample_metadata(&env),
+        );
+
+        assert_eq!(result, Err(Ok(PredictionMarketError::Unauthorized)));
+        assert_eq!(env.events().all(), vec![&env]);
+    }
+
+    #[test]
+    fn create_market_rejects_invalid_time_constraints() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000);
+
+        let contract_id = env.register(PredictionMarketContract, ());
+        let client = PredictionMarketContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let config = sample_config(&env, &admin);
+
+        seed_config(&env, &contract_id, &config);
+
+        let question = SorobanString::from_str(&env, "Bad timestamps");
+        let metadata = sample_metadata(&env);
+        let outcome_labels = sample_outcomes(&env);
+
+        env.mock_all_auths();
+
+        let betting_closed = client.try_create_market(
+            &admin,
+            &question,
+            &1_000_u64,
+            &2_000_u64,
+            &3_600_u64,
+            &outcome_labels,
+            &metadata,
+        );
+        assert_eq!(betting_closed, Err(Ok(PredictionMarketError::InvalidTimestamp)));
+
+        let deadline_before_betting_close = client.try_create_market(
+            &admin,
+            &question,
+            &1_500_u64,
+            &1_500_u64,
+            &3_600_u64,
+            &outcome_labels,
+            &metadata,
+        );
+        assert_eq!(
+            deadline_before_betting_close,
+            Err(Ok(PredictionMarketError::InvalidTimestamp))
+        );
+
+        let duration_too_long = client.try_create_market(
+            &admin,
+            &question,
+            &(1_500_u64),
+            &(1_000_u64 + config.max_market_duration_secs + 1),
+            &3_600_u64,
+            &outcome_labels,
+            &metadata,
+        );
+        assert_eq!(duration_too_long, Err(Ok(PredictionMarketError::InvalidTimestamp)));
+
+        let dispute_window_too_short = client.try_create_market(
+            &admin,
+            &question,
+            &1_500_u64,
+            &2_000_u64,
+            &3_599_u64,
+            &outcome_labels,
+            &metadata,
+        );
+        assert_eq!(
+            dispute_window_too_short,
+            Err(Ok(PredictionMarketError::InvalidTimestamp))
+        );
+    }
+
+    #[test]
+    fn create_market_rejects_invalid_outcomes_and_metadata() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_000);
+
+        let contract_id = env.register(PredictionMarketContract, ());
+        let client = PredictionMarketContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let config = sample_config(&env, &admin);
+
+        seed_config(&env, &contract_id, &config);
+
+        let question = SorobanString::from_str(&env, "Validation checks");
+        let metadata = sample_metadata(&env);
+
+        env.mock_all_auths();
+
+        let too_few_outcomes = vec![&env, SorobanString::from_str(&env, "Only One")];
+        assert_eq!(
+            client.try_create_market(
+                &admin,
+                &question,
+                &1_500_u64,
+                &2_000_u64,
+                &3_600_u64,
+                &too_few_outcomes,
+                &metadata,
+            ),
+            Err(Ok(PredictionMarketError::TooFewOutcomes))
+        );
+
+        let mut too_many_outcomes = SorobanVec::new(&env);
+        let mut outcome_index = 0;
+        while outcome_index < 11 {
+            let outcome_label = std::format!("Outcome {}", outcome_index);
+            too_many_outcomes.push_back(SorobanString::from_str(&env, &outcome_label));
+            outcome_index += 1;
+        }
+        assert_eq!(
+            client.try_create_market(
+                &admin,
+                &question,
+                &1_500_u64,
+                &2_000_u64,
+                &3_600_u64,
+                &too_many_outcomes,
+                &metadata,
+            ),
+            Err(Ok(PredictionMarketError::TooManyOutcomes))
+        );
+
+        let duplicate_outcomes = vec![
+            &env,
+            SorobanString::from_str(&env, "Draw"),
+            SorobanString::from_str(&env, "Draw")
+        ];
+        assert_eq!(
+            client.try_create_market(
+                &admin,
+                &question,
+                &1_500_u64,
+                &2_000_u64,
+                &3_600_u64,
+                &duplicate_outcomes,
+                &metadata,
+            ),
+            Err(Ok(PredictionMarketError::DuplicateOutcomeLabel))
+        );
+
+        let mut oversized_metadata = sample_metadata(&env);
+        let long_category = "a".repeat((super::MAX_CATEGORY_LEN + 1) as usize);
+        oversized_metadata.category = SorobanString::from_str(&env, &long_category);
+        assert_eq!(
+            client.try_create_market(
+                &admin,
+                &question,
+                &1_500_u64,
+                &2_000_u64,
+                &3_600_u64,
+                &sample_outcomes(&env),
+                &oversized_metadata,
+            ),
+            Err(Ok(PredictionMarketError::MetadataTooLong))
+        );
     }
 }

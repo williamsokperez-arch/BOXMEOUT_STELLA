@@ -117,8 +117,20 @@ pub fn market_created(
     market_id: u64,
     creator: Address,
     question: soroban_sdk::String,
+    betting_close_time: u64,
+    resolution_deadline: u64,
 ) {
-    todo!("Emit market_created event")
+    #[allow(deprecated)]
+    env.events().publish(
+        (Symbol::new(env, "mkt_created"), market_id),
+        (
+            market_id,
+            creator,
+            question,
+            betting_close_time,
+            resolution_deadline,
+        ),
+    );
 }
 
 /// Emitted when a market's metadata is updated.
