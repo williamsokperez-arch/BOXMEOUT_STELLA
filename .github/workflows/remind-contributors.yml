@@ -1,0 +1,82 @@
+name: Remind Contributors — No PR Warning
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # Runs daily at 8:00 AM UTC
+  workflow_dispatch:        # Can also be triggered manually
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Post 12-hour warning on assigned issues with no PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+
+            // Fetch all open issues (paginated)
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            // Keep only real issues that have at least one assignee (exclude PRs)
+            const assignedIssues = issues.filter(
+              (issue) => !issue.pull_request && issue.assignees.length > 0
+            );
+
+            console.log(`Found ${assignedIssues.length} assigned open issue(s).`);
+
+            for (const issue of assignedIssues) {
+              // Check the issue timeline for any cross-referenced PR
+              const timeline = await github.paginate(
+                github.rest.issues.listEventsForTimeline,
+                {
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  per_page: 100,
+                  mediaType: { previews: ['mockingbird'] },
+                }
+              );
+
+              const hasLinkedPR = timeline.some(
+                (event) =>
+                  event.event === 'cross-referenced' &&
+                  event.source?.issue?.pull_request
+              );
+
+              if (hasLinkedPR) {
+                console.log(`Issue #${issue.number} already has a linked PR — skipping.`);
+                continue;
+              }
+
+              // Build the @mention string for all assignees
+              const mentions = issue.assignees.map((a) => `@${a.login}`).join(', ');
+
+              const warningBody = [
+                `⚠️ **Unassignment Warning** — ${mentions}`,
+                ``,
+                `No pull request has been linked to this issue yet.`,
+                ``,
+                `Please submit a PR within the next **12 hours** or you will be **unassigned** from this issue so someone else can pick it up.`,
+                ``,
+                `If you need more time, drop a comment here with a quick progress update and we'll take it into account.`,
+              ].join('\n');
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.number,
+                body: warningBody,
+              });
+
+              console.log(`Posted warning on issue #${issue.number} for ${mentions}.`);
+            }
