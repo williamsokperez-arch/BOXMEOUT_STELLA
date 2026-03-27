@@ -4,3 +4,5 @@ export { UserRepository } from './user.repository.js';
 export { MarketRepository } from './market.repository.js';
 export { PredictionRepository } from './prediction.repository.js';
 export { TradeRepository } from './trade.repository.js';
+export { DistributionRepository } from './distribution.repository.js';
+export { TreasuryDistributionRepository } from './treasury-distribution.repository.js';

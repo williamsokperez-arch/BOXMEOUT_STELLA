@@ -58,6 +58,7 @@ model User {
   refreshTokens        RefreshToken[]
   disputes             Dispute[]
   auditLogs            AuditLog[]
+  winningsPayouts      WinningsPayout[]
 
   @@index([email])
   @@index([username])
@@ -139,6 +140,7 @@ model Market {
   trades      Trade[]
   disputes    Dispute[]
   attestations Attestation[]
+  winningsPayouts WinningsPayout[]
 
   @@index([contractAddress])
   @@index([category])
@@ -564,6 +566,38 @@ enum DistributionType {
 enum DistributionStatus {
   PENDING
   CONFIRMED
+  FAILED
+}
+
+// ============================================================================
+// WINNINGS PAYOUTS
+// ============================================================================
+
+model WinningsPayout {
+  id        String         @id @default(uuid())
+  userId    String         @map("user_id")
+  marketId  String         @map("market_id")
+  amount    Decimal        @db.Decimal(18, 6)
+  status    PayoutStatus   @default(PENDING)
+  txHash    String?        @map("tx_hash")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+  paidAt    DateTime?      @map("paid_at")
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  market Market @relation(fields: [marketId], references: [id])
+
+  @@unique([userId, marketId])
+  @@index([userId])
+  @@index([marketId])
+  @@index([status])
+  @@map("winnings_payouts")
+}
+
+enum PayoutStatus {
+  PENDING
+  PAID
   FAILED
 }
 

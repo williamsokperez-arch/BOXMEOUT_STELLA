@@ -2,14 +2,14 @@ import {
   treasuryService as blockchainTreasuryService,
   TreasuryBalances,
 } from './blockchain/treasury.js';
-import { DistributionRepository } from '../repositories/distribution.repository.js';
+import { TreasuryDistributionRepository } from '../repositories/treasury-distribution.repository.js';
 import { DistributionType, DistributionStatus } from '@prisma/client';
 
 export class TreasuryService {
-  private distributionRepository: DistributionRepository;
+  private distributionRepository: TreasuryDistributionRepository;
 
   constructor() {
-    this.distributionRepository = new DistributionRepository();
+    this.distributionRepository = new TreasuryDistributionRepository();
   }
 
   async getBalances(): Promise<TreasuryBalances> {
