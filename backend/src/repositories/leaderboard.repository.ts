@@ -15,23 +15,34 @@ export class LeaderboardRepository extends BaseRepository<Leaderboard> {
 
   async updateUserStats(userId: string, pnl: number, isWin: boolean) {
     try {
-      const leaderboard = await this.prisma.leaderboard.findUnique({ where: { userId } });
+      const leaderboard = await this.prisma.leaderboard.findUnique({
+        where: { userId },
+      });
 
       if (!leaderboard) {
         return await this.prisma.leaderboard.create({
           data: {
-            userId, globalRank: 0, weeklyRank: 0,
-            allTimePnl: pnl, weeklyPnl: pnl,
-            allTimeWinRate: isWin ? 100 : 0, weeklyWinRate: isWin ? 100 : 0,
-            predictionCount: 1, streakLength: 1,
+            userId,
+            globalRank: 0,
+            weeklyRank: 0,
+            allTimePnl: pnl,
+            weeklyPnl: pnl,
+            allTimeWinRate: isWin ? 100 : 0,
+            weeklyWinRate: isWin ? 100 : 0,
+            predictionCount: 1,
+            streakLength: 1,
             streakType: isWin ? StreakType.WIN : StreakType.LOSS,
             lastPredictionAt: new Date(),
           },
         });
       }
 
-      const newAllTimePnl = new Decimal(leaderboard.allTimePnl.toString()).plus(pnl);
-      const newWeeklyPnl = new Decimal(leaderboard.weeklyPnl.toString()).plus(pnl);
+      const newAllTimePnl = new Decimal(leaderboard.allTimePnl.toString()).plus(
+        pnl
+      );
+      const newWeeklyPnl = new Decimal(leaderboard.weeklyPnl.toString()).plus(
+        pnl
+      );
       const newCount = leaderboard.predictionCount + 1;
       const currentIsWin = isWin ? StreakType.WIN : StreakType.LOSS;
       let newStreakType = leaderboard.streakType;
@@ -46,14 +57,26 @@ export class LeaderboardRepository extends BaseRepository<Leaderboard> {
 
       return await this.prisma.leaderboard.update({
         where: { userId },
-        data: { allTimePnl: newAllTimePnl, weeklyPnl: newWeeklyPnl, predictionCount: newCount, streakLength: newStreakLength, streakType: newStreakType, lastPredictionAt: new Date() },
+        data: {
+          allTimePnl: newAllTimePnl,
+          weeklyPnl: newWeeklyPnl,
+          predictionCount: newCount,
+          streakLength: newStreakLength,
+          streakType: newStreakType,
+          lastPredictionAt: new Date(),
+        },
       });
     } catch (err) {
       throw toRepositoryError(this.getModelName(), err);
     }
   }
 
-  async updateCategoryStats(userId: string, category: MarketCategory, pnl: number, isWin: boolean) {
+  async updateCategoryStats(
+    userId: string,
+    category: MarketCategory,
+    pnl: number,
+    isWin: boolean
+  ) {
     try {
       const stats = await this.prisma.categoryLeaderboard.findUnique({
         where: { userId_category: { userId, category } },
@@ -61,7 +84,13 @@ export class LeaderboardRepository extends BaseRepository<Leaderboard> {
 
       if (!stats) {
         return await this.prisma.categoryLeaderboard.create({
-          data: { userId, category, totalPnl: pnl, predictionCount: 1, winRate: isWin ? 100 : 0 },
+          data: {
+            userId,
+            category,
+            totalPnl: pnl,
+            predictionCount: 1,
+            winRate: isWin ? 100 : 0,
+          },
         });
       }
 
@@ -131,7 +160,11 @@ export class LeaderboardRepository extends BaseRepository<Leaderboard> {
         orderBy: { globalRank: 'asc' },
         take: limit,
         skip: offset,
-        include: { user: { select: { username: true, displayName: true, avatarUrl: true } } },
+        include: {
+          user: {
+            select: { username: true, displayName: true, avatarUrl: true },
+          },
+        },
       });
     } catch (err) {
       throw toRepositoryError(this.getModelName(), err);
@@ -144,7 +177,11 @@ export class LeaderboardRepository extends BaseRepository<Leaderboard> {
         orderBy: { weeklyRank: 'asc' },
         take: limit,
         skip: offset,
-        include: { user: { select: { username: true, displayName: true, avatarUrl: true } } },
+        include: {
+          user: {
+            select: { username: true, displayName: true, avatarUrl: true },
+          },
+        },
       });
     } catch (err) {
       throw toRepositoryError(this.getModelName(), err);
@@ -158,7 +195,11 @@ export class LeaderboardRepository extends BaseRepository<Leaderboard> {
         orderBy: { rank: 'asc' },
         take: limit,
         skip: offset,
-        include: { user: { select: { username: true, displayName: true, avatarUrl: true } } },
+        include: {
+          user: {
+            select: { username: true, displayName: true, avatarUrl: true },
+          },
+        },
       });
     } catch (err) {
       throw toRepositoryError(this.getModelName(), err);

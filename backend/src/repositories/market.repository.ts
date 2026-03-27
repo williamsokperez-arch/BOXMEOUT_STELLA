@@ -13,7 +13,12 @@ export class MarketRepository extends BaseRepository<Market> {
     );
   }
 
-  async addAttestation(marketId: string, oracleId: string, outcome: number, txHash: string) {
+  async addAttestation(
+    marketId: string,
+    oracleId: string,
+    outcome: number,
+    txHash: string
+  ) {
     return this.timedQuery('addAttestation', () =>
       this.prisma.$transaction(async (tx) => {
         const attestation = await tx.attestation.create({
@@ -51,7 +56,14 @@ export class MarketRepository extends BaseRepository<Market> {
       this.prisma.market.create({
         data,
         include: {
-          creator: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+          creator: {
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatarUrl: true,
+            },
+          },
         },
       })
     );
@@ -122,7 +134,11 @@ export class MarketRepository extends BaseRepository<Market> {
     );
   }
 
-  async updateLiquidity(marketId: string, yesLiquidity: number, noLiquidity: number): Promise<Market> {
+  async updateLiquidity(
+    marketId: string,
+    yesLiquidity: number,
+    noLiquidity: number
+  ): Promise<Market> {
     return this.timedQuery('updateLiquidity', () =>
       this.prisma.market.update({
         where: { id: marketId },
@@ -162,7 +178,11 @@ export class MarketRepository extends BaseRepository<Market> {
     );
   }
 
-  async getMarketsByCategory(category: MarketCategory, skip?: number, take?: number): Promise<Market[]> {
+  async getMarketsByCategory(
+    category: MarketCategory,
+    skip?: number,
+    take?: number
+  ): Promise<Market[]> {
     return this.timedQuery('getMarketsByCategory', () =>
       this.prisma.market.findMany({
         where: { category, status: MarketStatus.OPEN },
@@ -198,12 +218,13 @@ export class MarketRepository extends BaseRepository<Market> {
 
   async getMarketStatistics() {
     return this.timedQuery('getMarketStatistics', async () => {
-      const [totalMarkets, activeMarkets, totalVolume, avgParticipants] = await Promise.all([
-        this.prisma.market.count(),
-        this.prisma.market.count({ where: { status: MarketStatus.OPEN } }),
-        this.prisma.market.aggregate({ _sum: { totalVolume: true } }),
-        this.prisma.market.aggregate({ _avg: { participantCount: true } }),
-      ]);
+      const [totalMarkets, activeMarkets, totalVolume, avgParticipants] =
+        await Promise.all([
+          this.prisma.market.count(),
+          this.prisma.market.count({ where: { status: MarketStatus.OPEN } }),
+          this.prisma.market.aggregate({ _sum: { totalVolume: true } }),
+          this.prisma.market.aggregate({ _avg: { participantCount: true } }),
+        ]);
       return {
         totalMarkets,
         activeMarkets,

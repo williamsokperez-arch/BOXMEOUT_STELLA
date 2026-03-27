@@ -19,7 +19,10 @@ export class NotificationRepository extends BaseRepository<Notification> {
     );
   }
 
-  async findByUserId(userId: string, limit: number = 20): Promise<Notification[]> {
+  async findByUserId(
+    userId: string,
+    limit: number = 20
+  ): Promise<Notification[]> {
     return this.timedQuery('findByUserId', () =>
       this.prisma.notification.findMany({
         where: { userId },

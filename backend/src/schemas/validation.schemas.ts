@@ -288,13 +288,17 @@ export const resolveDisputeBody = z
   })
   .refine(
     (data) => {
-      if (data.action === 'RESOLVE_NEW_OUTCOME' && data.newWinningOutcome === undefined) {
+      if (
+        data.action === 'RESOLVE_NEW_OUTCOME' &&
+        data.newWinningOutcome === undefined
+      ) {
         return false;
       }
       return true;
     },
     {
-      message: 'New winning outcome is required when action is RESOLVE_NEW_OUTCOME',
+      message:
+        'New winning outcome is required when action is RESOLVE_NEW_OUTCOME',
       path: ['newWinningOutcome'],
     }
   );

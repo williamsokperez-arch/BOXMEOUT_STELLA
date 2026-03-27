@@ -37,18 +37,31 @@ export class UserRepository extends BaseRepository<User> {
     );
   }
 
-  async updateBalance(userId: string, usdcBalance?: number, xlmBalance?: number): Promise<User> {
+  async updateBalance(
+    userId: string,
+    usdcBalance?: number,
+    xlmBalance?: number
+  ): Promise<User> {
     return this.timedQuery('updateBalance', () => {
       const updateData: any = {};
       if (usdcBalance !== undefined) updateData.usdcBalance = usdcBalance;
       if (xlmBalance !== undefined) updateData.xlmBalance = xlmBalance;
-      return this.prisma.user.update({ where: { id: userId }, data: updateData });
+      return this.prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+      });
     });
   }
 
-  async updateWalletAddress(userId: string, walletAddress: string): Promise<User> {
+  async updateWalletAddress(
+    userId: string,
+    walletAddress: string
+  ): Promise<User> {
     return this.timedQuery('updateWalletAddress', () =>
-      this.prisma.user.update({ where: { id: userId }, data: { walletAddress } })
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { walletAddress },
+      })
     );
   }
 
@@ -60,11 +73,17 @@ export class UserRepository extends BaseRepository<User> {
 
   async updateLastLogin(userId: string): Promise<User> {
     return this.timedQuery('updateLastLogin', () =>
-      this.prisma.user.update({ where: { id: userId }, data: { lastLogin: new Date() } })
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { lastLogin: new Date() },
+      })
     );
   }
 
-  async searchUsers(query: string, limit: number = 10): Promise<Partial<User>[]> {
+  async searchUsers(
+    query: string,
+    limit: number = 10
+  ): Promise<Partial<User>[]> {
     return this.timedQuery('searchUsers', () =>
       this.prisma.user.findMany({
         where: {
@@ -93,7 +112,9 @@ export class UserRepository extends BaseRepository<User> {
       const [user, predictionCount, winCount, totalPnl] = await Promise.all([
         this.findById(userId),
         this.prisma.prediction.count({ where: { userId, status: 'SETTLED' } }),
-        this.prisma.prediction.count({ where: { userId, status: 'SETTLED', isWinner: true } }),
+        this.prisma.prediction.count({
+          where: { userId, status: 'SETTLED', isWinner: true },
+        }),
         this.prisma.prediction.aggregate({
           where: { userId, status: 'SETTLED' },
           _sum: { pnlUsd: true },

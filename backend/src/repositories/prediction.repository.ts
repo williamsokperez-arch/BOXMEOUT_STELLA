@@ -24,13 +24,20 @@ export class PredictionRepository extends BaseRepository<Prediction> {
     );
   }
 
-  async findByUserAndMarket(userId: string, marketId: string): Promise<Prediction | null> {
+  async findByUserAndMarket(
+    userId: string,
+    marketId: string
+  ): Promise<Prediction | null> {
     return this.timedQuery('findByUserAndMarket', () =>
       this.prisma.prediction.findFirst({ where: { userId, marketId } })
     );
   }
 
-  async revealPrediction(predictionId: string, predictedOutcome: number, revealTxHash?: string): Promise<Prediction> {
+  async revealPrediction(
+    predictionId: string,
+    predictedOutcome: number,
+    revealTxHash?: string
+  ): Promise<Prediction> {
     return this.timedQuery('revealPrediction', () =>
       this.prisma.prediction.update({
         where: { id: predictionId },
@@ -46,11 +53,20 @@ export class PredictionRepository extends BaseRepository<Prediction> {
     );
   }
 
-  async settlePrediction(predictionId: string, isWinner: boolean, pnlUsd: number): Promise<Prediction> {
+  async settlePrediction(
+    predictionId: string,
+    isWinner: boolean,
+    pnlUsd: number
+  ): Promise<Prediction> {
     return this.timedQuery('settlePrediction', () =>
       this.prisma.prediction.update({
         where: { id: predictionId },
-        data: { status: PredictionStatus.SETTLED, isWinner, pnlUsd, settledAt: new Date() },
+        data: {
+          status: PredictionStatus.SETTLED,
+          isWinner,
+          pnlUsd,
+          settledAt: new Date(),
+        },
       })
     );
   }
@@ -75,7 +91,16 @@ export class PredictionRepository extends BaseRepository<Prediction> {
         skip: options?.skip,
         take: options?.take || 50,
         include: {
-          market: { select: { id: true, title: true, category: true, status: true, outcomeA: true, outcomeB: true } },
+          market: {
+            select: {
+              id: true,
+              title: true,
+              category: true,
+              status: true,
+              outcomeA: true,
+              outcomeB: true,
+            },
+          },
         },
       })
     );
@@ -86,7 +111,14 @@ export class PredictionRepository extends BaseRepository<Prediction> {
       this.prisma.prediction.findMany({
         where: { marketId, status: PredictionStatus.REVEALED },
         include: {
-          user: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+          user: {
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              avatarUrl: true,
+            },
+          },
         },
       })
     );
@@ -95,8 +127,15 @@ export class PredictionRepository extends BaseRepository<Prediction> {
   async getUnclaimedWinnings(userId: string): Promise<Prediction[]> {
     return this.timedQuery('getUnclaimedWinnings', () =>
       this.prisma.prediction.findMany({
-        where: { userId, status: PredictionStatus.SETTLED, isWinner: true, winningsClaimed: false },
-        include: { market: { select: { id: true, title: true, category: true } } },
+        where: {
+          userId,
+          status: PredictionStatus.SETTLED,
+          isWinner: true,
+          winningsClaimed: false,
+        },
+        include: {
+          market: { select: { id: true, title: true, category: true } },
+        },
       })
     );
   }
@@ -104,11 +143,23 @@ export class PredictionRepository extends BaseRepository<Prediction> {
   async getUserPredictionStats(userId: string) {
     return this.timedQuery('getUserPredictionStats', async () => {
       const [total, wins, losses, totalPnl, avgPnl] = await Promise.all([
-        this.prisma.prediction.count({ where: { userId, status: PredictionStatus.SETTLED } }),
-        this.prisma.prediction.count({ where: { userId, status: PredictionStatus.SETTLED, isWinner: true } }),
-        this.prisma.prediction.count({ where: { userId, status: PredictionStatus.SETTLED, isWinner: false } }),
-        this.prisma.prediction.aggregate({ where: { userId, status: PredictionStatus.SETTLED }, _sum: { pnlUsd: true } }),
-        this.prisma.prediction.aggregate({ where: { userId, status: PredictionStatus.SETTLED }, _avg: { pnlUsd: true } }),
+        this.prisma.prediction.count({
+          where: { userId, status: PredictionStatus.SETTLED },
+        }),
+        this.prisma.prediction.count({
+          where: { userId, status: PredictionStatus.SETTLED, isWinner: true },
+        }),
+        this.prisma.prediction.count({
+          where: { userId, status: PredictionStatus.SETTLED, isWinner: false },
+        }),
+        this.prisma.prediction.aggregate({
+          where: { userId, status: PredictionStatus.SETTLED },
+          _sum: { pnlUsd: true },
+        }),
+        this.prisma.prediction.aggregate({
+          where: { userId, status: PredictionStatus.SETTLED },
+          _avg: { pnlUsd: true },
+        }),
       ]);
       return {
         totalPredictions: total,
@@ -124,10 +175,27 @@ export class PredictionRepository extends BaseRepository<Prediction> {
   async getMarketPredictionStats(marketId: string) {
     return this.timedQuery('getMarketPredictionStats', async () => {
       const [total, yesCount, noCount, totalVolume] = await Promise.all([
-        this.prisma.prediction.count({ where: { marketId, status: PredictionStatus.REVEALED } }),
-        this.prisma.prediction.count({ where: { marketId, status: PredictionStatus.REVEALED, predictedOutcome: 1 } }),
-        this.prisma.prediction.count({ where: { marketId, status: PredictionStatus.REVEALED, predictedOutcome: 0 } }),
-        this.prisma.prediction.aggregate({ where: { marketId, status: PredictionStatus.REVEALED }, _sum: { amountUsdc: true } }),
+        this.prisma.prediction.count({
+          where: { marketId, status: PredictionStatus.REVEALED },
+        }),
+        this.prisma.prediction.count({
+          where: {
+            marketId,
+            status: PredictionStatus.REVEALED,
+            predictedOutcome: 1,
+          },
+        }),
+        this.prisma.prediction.count({
+          where: {
+            marketId,
+            status: PredictionStatus.REVEALED,
+            predictedOutcome: 0,
+          },
+        }),
+        this.prisma.prediction.aggregate({
+          where: { marketId, status: PredictionStatus.REVEALED },
+          _sum: { amountUsdc: true },
+        }),
       ]);
       return {
         totalPredictions: total,
