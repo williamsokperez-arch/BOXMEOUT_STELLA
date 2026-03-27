@@ -1,4 +1,4 @@
-import { BaseRepository } from './base.repository.js';
+import { BaseRepository, toRepositoryError } from './base.repository.js';
 import {
   Distribution,
   DistributionType,
@@ -48,9 +48,11 @@ export class DistributionRepository extends BaseRepository<Distribution> {
   }
 
   async findByTxHash(txHash: string): Promise<Distribution | null> {
-    return await this.getModel().findFirst({
-      where: { txHash },
-    });
+    try {
+      return await this.getModel().findFirst({ where: { txHash } });
+    } catch (err) {
+      throw toRepositoryError(this.getModelName(), err);
+    }
   }
 
   async findRecent(limit: number = 20): Promise<Distribution[]> {
