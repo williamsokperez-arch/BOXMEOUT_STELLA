@@ -100,6 +100,13 @@ pub enum PredictionMarketError {
     MetadataTooLong = 105,
 
     // ── General ──────────────────────────────────────────────────────────────
+    ArithmeticError = 100,
+    TransferFailed = 101,
+    InvalidTimestamp = 102,
+    /// Market is in an unexpected status for the requested operation
+    InvalidMarketStatus = 103,
+    /// Resolution deadline has already passed
+    ResolutionDeadlinePassed = 104,
     ArithmeticError = 110,
     TransferFailed = 111,
     InvalidTimestamp = 112,
