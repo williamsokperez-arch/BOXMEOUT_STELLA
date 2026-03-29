@@ -1,17 +1,9 @@
-import { BaseRepository, toRepositoryError } from './base.repository.js';
-import {
-  Distribution,
-  DistributionType,
-  DistributionStatus,
-  PrismaClient,
-} from '@prisma/client';
-
-export class DistributionRepository extends BaseRepository<Distribution> {
-﻿// Distribution repository - tracks per-user winnings payouts for resolved markets.
+// Distribution repository - tracks per-user winnings payouts for resolved markets.
 // Auditable and idempotent: markPaid is a no-op if the record is already PAID.
 import { WinningsPayout, PayoutStatus, PrismaClient } from '@prisma/client';
 import { BaseRepository } from './base.repository.js';
 
+export class DistributionRepository extends BaseRepository<WinningsPayout> {
   constructor(prismaClient?: PrismaClient) {
     super(prismaClient);
   }
@@ -72,12 +64,6 @@ import { BaseRepository } from './base.repository.js';
     });
   }
 
-  async findByTxHash(txHash: string): Promise<Distribution | null> {
-    try {
-      return await this.getModel().findFirst({ where: { txHash } });
-    } catch (err) {
-      throw toRepositoryError(this.getModelName(), err);
-    }
   /** All payout records for a given market, oldest first. */
   async findByMarket(marketId: string): Promise<WinningsPayout[]> {
     return await this.prisma.winningsPayout.findMany({

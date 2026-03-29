@@ -56,4 +56,23 @@ export class TreasuryDistributionRepository extends BaseRepository<Distribution>
   async findRecent(limit: number = 20): Promise<Distribution[]> {
     return await this.findMany({ orderBy: { createdAt: 'desc' }, take: limit });
   }
+
+  async findPaginated(page: number, limit: number): Promise<{ data: Distribution[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.findMany({ orderBy: { createdAt: 'desc' }, skip: (page - 1) * limit, take: limit }),
+      this.count(),
+    ]);
+    return { data, total };
+  }
+
+  async getAggregate(): Promise<{ totalCollected: number; pendingFees: number }> {
+    const [confirmed, pending] = await Promise.all([
+      this.getModel().aggregate({ _sum: { totalAmount: true }, where: { status: 'CONFIRMED' } }),
+      this.getModel().aggregate({ _sum: { totalAmount: true }, where: { status: 'PENDING' } }),
+    ]);
+    return {
+      totalCollected: Number(confirmed._sum.totalAmount ?? 0),
+      pendingFees: Number(pending._sum.totalAmount ?? 0),
+    };
+  }
 }

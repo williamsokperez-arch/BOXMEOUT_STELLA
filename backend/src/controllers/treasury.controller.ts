@@ -10,6 +10,34 @@ export class TreasuryController {
     this.treasuryService = new TreasuryService();
   }
 
+  async getStats(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const stats = await this.treasuryService.getStats();
+      res.json({ success: true, data: stats });
+    } catch (error) {
+      (req.log || logger).error('Get treasury stats error', { error });
+      res.status(500).json({
+        success: false,
+        error: { code: 'TREASURY_ERROR', message: error instanceof Error ? error.message : 'Failed to fetch stats' },
+      });
+    }
+  }
+
+  async getHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+      const result = await this.treasuryService.getHistory(page, limit);
+      res.json({ success: true, data: result.data, meta: { page, limit, total: result.total } });
+    } catch (error) {
+      (req.log || logger).error('Get treasury history error', { error });
+      res.status(500).json({
+        success: false,
+        error: { code: 'TREASURY_ERROR', message: error instanceof Error ? error.message : 'Failed to fetch history' },
+      });
+    }
+  }
+
   async getBalances(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const balances = await this.treasuryService.getBalances();

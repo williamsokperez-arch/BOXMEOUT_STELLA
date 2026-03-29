@@ -49,6 +49,14 @@ router.get('/balances', requireAuth, (req, res) =>
   treasuryController.getBalances(req, res)
 );
 
+router.get('/stats', requireAuth, requireAdmin, (req, res) =>
+  treasuryController.getStats(req, res)
+);
+
+router.get('/history', requireAuth, requireAdmin, (req, res) =>
+  treasuryController.getHistory(req, res)
+);
+
 router.post(
   '/distribute-leaderboard',
   requireAuth,
