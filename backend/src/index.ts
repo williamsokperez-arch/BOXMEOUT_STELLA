@@ -16,6 +16,7 @@ import leaderboardRoutes from './routes/leaderboard.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
 import walletRoutes from './routes/wallet.routes.js';
 import disputeRoutes from './routes/disputes.routes.js';
+import indexerRoutes from './routes/indexer.routes.js';
 
 // Import Redis initialization
 import {
@@ -250,6 +251,9 @@ app.use('/api/wallet', walletRoutes);
 
 // Dispute routes
 app.use('/api/disputes', disputeRoutes);
+
+// Indexer routes
+app.use('/api/indexer', indexerRoutes);
 
 // =============================================================================
 // ERROR HANDLING - UPDATED WITH NEW ERROR HANDLER

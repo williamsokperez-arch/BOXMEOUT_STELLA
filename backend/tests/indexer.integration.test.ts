@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import app from '../src/index.js';
+import * as jwtUtils from '../src/utils/jwt.js';
 
 // Mock JWT verification for admin
 vi.mock('../src/utils/jwt.js', () => ({
@@ -47,11 +48,11 @@ describe('Indexer API Integration Tests', () => {
 
     it('should require admin access', async () => {
       // Mock non-admin user
-      vi.mocked(require('../src/utils/jwt.js').verifyAccessToken).mockReturnValueOnce({
+      vi.mocked(jwtUtils.verifyAccessToken).mockReturnValueOnce({
         userId: 'regular-user-id',
         publicKey: 'GREGULAR',
         tier: 'BEGINNER',
-      });
+      } as any);
 
       const response = await request(app)
         .get('/api/indexer/status')

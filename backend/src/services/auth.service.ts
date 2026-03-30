@@ -70,8 +70,9 @@ export class AuthService {
     email: string;
     username: string;
     password: string;
+    referralCode?: string;
   }): Promise<LoginResponse> {
-    const { email, username, password } = data;
+    const { email, username, password, referralCode } = data;
 
     // Check if email already exists
     const existingUser = await this.userRepository.findByEmail(email);
@@ -127,6 +128,16 @@ export class AuthService {
     };
 
     await this.sessionSvc.createSession(sessionData);
+
+    // Apply referral bonus if a referral code was provided
+    if (referralCode) {
+      try {
+        const { referralService } = await import('./referral.service.js');
+        await referralService.applyReferralAtRegistration(referralCode, user.id);
+      } catch {
+        // Non-fatal — don't block registration
+      }
+    }
 
     return {
       accessToken,

@@ -48,6 +48,11 @@ async function rejectSuspended(
 router.get('/me', requireAuth, rejectSuspended, usersController.getMyProfile.bind(usersController));
 
 /**
+ * GET /api/users/me/achievements — returns all earned achievements for the authenticated user
+ */
+router.get('/me/achievements', requireAuth, usersController.getMyAchievements.bind(usersController));
+
+/**
  * @swagger
  * /api/users:
  *   get:

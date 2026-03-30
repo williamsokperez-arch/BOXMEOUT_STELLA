@@ -233,7 +233,7 @@ export class TradingService {
       };
     });
 
-    return {
+    const buyResult2 = {
       sharesBought: buyResult.sharesReceived,
       pricePerUnit: buyResult.pricePerUnit,
       totalCost: buyResult.totalCost,
@@ -246,6 +246,28 @@ export class TradingService {
           Number(result.share.costBasis) / Number(result.share.quantity),
       },
     };
+
+    // Fire-and-forget: referral first-trade reward + achievement check
+    Promise.all([
+      import('./referral.service.js').then(({ referralService }) =>
+        referralService.onFirstTrade(userId)
+      ),
+      import('./achievement.service.js').then(({ achievementService }) =>
+        achievementService.checkAndAward(userId, 'first_trade')
+      ),
+    ]).catch(() => {});
+
+    // Emit real-time price update to market subscribers
+    import('../websocket/realtime.js').then(({ emitPriceUpdate }) => {
+      emitPriceUpdate(
+        marketId,
+        outcome,
+        Math.round(buyResult.pricePerUnit * 10000),
+        buyResult.totalCost
+      );
+    }).catch(() => {});
+
+    return buyResult2;
   }
 
   /**

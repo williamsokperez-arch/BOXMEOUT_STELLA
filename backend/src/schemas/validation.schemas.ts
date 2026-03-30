@@ -74,6 +74,7 @@ export const registerBody = z.object({
   email: emailSchema,
   username: sanitizedString(3, 50),
   password: passwordSchema,
+  referralCode: z.string().optional(),
 });
 
 export const emailLoginBody = z.object({

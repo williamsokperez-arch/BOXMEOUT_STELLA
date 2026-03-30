@@ -322,3 +322,5 @@ router.get(
     walletController.getTransactions(req as AuthenticatedRequest, res).catch(next);
   }
 );
+
+export default router;

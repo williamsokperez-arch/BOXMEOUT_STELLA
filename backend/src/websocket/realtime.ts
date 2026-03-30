@@ -414,6 +414,40 @@ export function initializeSocketIO(
       socket.emit('heartbeat_ack', { timestamp: Date.now() });
     });
 
+    // Subscribe to market updates (message-based: { type: 'subscribe', marketId })
+    socket.on('message', (data: { type?: string; marketId?: string }) => {
+      if (!data || typeof data !== 'object') return;
+
+      if (data.type === 'subscribe' && data.marketId) {
+        const marketId = data.marketId;
+        if (!isValidMarketId(marketId)) {
+          socket.emit('error', { message: 'Invalid market ID' });
+          return;
+        }
+        if (!checkRateLimit(socket.id, 'subscribe', rateLimits)) {
+          socket.emit('error', { message: 'Rate limit exceeded' });
+          return;
+        }
+        socket.join(`market:${marketId}`);
+        socket.emit('subscribed', { marketId });
+        return;
+      }
+
+      if (data.type === 'unsubscribe' && data.marketId) {
+        const marketId = data.marketId;
+        if (!isValidMarketId(marketId)) {
+          socket.emit('error', { message: 'Invalid market ID' });
+          return;
+        }
+        if (!checkRateLimit(socket.id, 'unsubscribe', rateLimits)) {
+          socket.emit('error', { message: 'Rate limit exceeded' });
+          return;
+        }
+        socket.leave(`market:${marketId}`);
+        socket.emit('unsubscribed', { marketId });
+      }
+    });
+
     // Subscribe to market updates
     socket.on('subscribe_market', (marketId: string) => {
       if (!isValidMarketId(marketId)) {
@@ -658,4 +692,41 @@ export function notifyBalanceUpdated(
     ...payload,
     timestamp: Date.now(),
   });
+}
+
+// ============================================================================
+// PRICE FEED
+// Called from trading.service after every trade to push live price updates
+// to all clients subscribed to that market.
+// ============================================================================
+
+export interface PriceUpdatePayload {
+  type: 'price_update';
+  marketId: string;
+  outcomeId: number;
+  newPriceBps: number;
+  volume: number;
+  timestamp: number;
+}
+
+/**
+ * Broadcast a price update to all clients subscribed to the given market room.
+ */
+export function emitPriceUpdate(
+  marketId: string,
+  outcomeId: number,
+  newPriceBps: number,
+  volume: number
+): void {
+  if (!_ioRef) return;
+  const payload: PriceUpdatePayload = {
+    type: 'price_update',
+    marketId,
+    outcomeId,
+    newPriceBps,
+    volume,
+    timestamp: Date.now(),
+  };
+  _ioRef.to(`market:${marketId}`).emit('price_update', payload);
+  logger.debug('Price update emitted', { marketId, outcomeId, newPriceBps });
 }

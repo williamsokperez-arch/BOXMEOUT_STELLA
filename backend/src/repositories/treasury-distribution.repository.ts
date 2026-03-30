@@ -1,4 +1,4 @@
-﻿// Treasury distribution repository - tracks bulk treasury payouts (leaderboard, creator rewards).
+// Treasury distribution repository - tracks bulk treasury payouts (leaderboard, creator rewards).
 // This is separate from the per-user WinningsPayout tracked in DistributionRepository.
 import {
   Distribution,

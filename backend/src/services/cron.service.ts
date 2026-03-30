@@ -251,6 +251,11 @@ export class CronService {
             pnlUsd
           );
           settled++;
+
+          // Fire-and-forget achievement check after settlement
+          import('./achievement.service.js').then(({ achievementService }) =>
+            achievementService.checkAndAward(prediction.userId, 'prediction_settled')
+          ).catch(() => {});
         }
 
         logger.info(
