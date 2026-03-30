@@ -409,6 +409,18 @@ impl PredictionMarketContract {
         todo!("Implement is_operator check")
     }
 
+    /// Return the current state of the global emergency pause.
+    ///
+    /// # Returns
+    /// - `true` if emergency pause is active.
+    /// - `false` if the key is not set (default).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::EmergencyPause)
+            .unwrap_or(false)
+    }
+
     // =========================================================================
     // SECTION 4 — MARKET CREATION & CONFIGURATION
     // =========================================================================
