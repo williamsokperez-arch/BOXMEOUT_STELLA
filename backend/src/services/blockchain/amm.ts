@@ -18,6 +18,7 @@ import {
   scValToNative,
   xdr,
   Keypair,
+  Account,
 } from '@stellar/stellar-sdk';
 import { BaseBlockchainService } from './base.js';
 import { logger } from '../../utils/logger.js';
@@ -37,6 +38,7 @@ interface BuySharesResult {
   pricePerUnit: number;
   totalCost: number;
   feeAmount: number;
+  priceImpactBps: number;
   txHash: string;
 }
 
@@ -215,6 +217,59 @@ export class AmmService extends BaseBlockchainService {
       logger.error('AMM.buy_shares() error', { error });
       throw new Error(
         `Failed to buy shares: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Get a read-only quote for a buy/sell trade
+   * @param params - Quote parameters
+   * @returns Quote details including amount out and price impact
+   */
+  async getTradeQuote(params: {
+    marketId: string;
+    outcome: number;
+    amount: number;
+    isBuy: boolean;
+  }): Promise<Omit<BuySharesResult, 'txHash'>> {
+    if (!this.ammContractId) {
+      throw new Error('AMM contract address not configured');
+    }
+
+    try {
+      const contract = new Contract(this.ammContractId);
+      
+      // We use simulation only for quotes (no auth required for purely read-only logic)
+      const response = await this.rpcServer.simulateTransaction(
+        new TransactionBuilder(
+          new Account('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', '0'),
+          {
+            fee: '100',
+            networkPassphrase: this.networkPassphrase,
+          }
+        )
+          .addOperation(
+            contract.call(
+              'get_trade_quote',
+              nativeToScVal(Buffer.from(params.marketId.replace(/^0x/, ''), 'hex')),
+              nativeToScVal(params.outcome),
+              nativeToScVal(BigInt(params.amount)),
+              nativeToScVal(params.isBuy)
+            )
+          )
+          .setTimeout(30)
+          .build()
+      );
+
+      if (response && !('error' in (response as any))) {
+        return this.parseBuySharesResult((response as any).results?.[0]?.retval);
+      } else {
+        throw new Error(`Simulation failed: ${(response as any)?.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      logger.error('AMM.get_trade_quote() error', { error });
+      throw new Error(
+        `Failed to get quote: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }
@@ -857,17 +912,15 @@ export class AmmService extends BaseBlockchainService {
     }
 
     try {
-      // Expected return format: { shares_received, price_per_unit, total_cost, fee_amount }
       const result = scValToNative(returnValue);
 
       return {
-        sharesReceived: Number(
-          result.shares_received || result.sharesReceived || 0
-        ),
-        pricePerUnit: Number(result.price_per_unit || result.pricePerUnit || 0),
-        totalCost: Number(result.total_cost || result.totalCost || 0),
-        feeAmount: Number(result.fee_amount || result.feeAmount || 0),
-      };
+        sharesReceived: Number(result.shares_delta),
+        pricePerUnit: Number(result.avg_price_bps) / 10000,
+        totalCost: Number(result.collateral_delta),
+        feeAmount: Number(result.total_fees),
+        priceImpactBps: Number(result.new_price_bps),
+      } as any;
     } catch (error) {
       logger.error('Error parsing buy shares result', { error });
       throw new Error('Failed to parse contract response');

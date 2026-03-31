@@ -5,6 +5,7 @@ const HMAC_SECRET =
   process.env.REFERRAL_HMAC_SECRET || 'default_referral_secret';
 const SIGNUP_BONUS = parseFloat(process.env.REFERRAL_SIGNUP_BONUS_USDC || '5');
 const REFERRER_BONUS = parseFloat(process.env.REFERRER_BONUS_USDC || '10');
+const FIRST_TRADE_BONUS = parseFloat(process.env.REFERRAL_FIRST_TRADE_BONUS_USDC || '5');
 
 export class ReferralService {
   generateReferralCode(userId: string): string {
@@ -43,16 +44,23 @@ export class ReferralService {
 
   async getReferralInfo(userId: string) {
     const code = this.generateReferralCode(userId);
-    const referralsCount = await prisma.referral.count({
+    const referrals = await prisma.referral.findMany({
       where: { referrerId: userId },
+      include: { referredUser: { select: { id: true, username: true, createdAt: true } } },
     });
-    const totalEarned = referralsCount * REFERRER_BONUS;
+    const totalEarned = referrals.length * REFERRER_BONUS;
 
     return {
       referralCode: code,
       referralLink: `${process.env.FRONTEND_URL || 'https://app.example.com'}?ref=${code}`,
-      referralsCount,
+      referralsCount: referrals.length,
       totalEarned,
+      referrals: referrals.map((r) => ({
+        userId: r.referredUserId,
+        username: r.referredUser?.username ?? null,
+        joinedAt: r.referredSignupAt,
+        rewardEarned: r.referrerBonusClaimed ? REFERRER_BONUS : 0,
+      })),
       bonusRules: {
         referrerBonus: REFERRER_BONUS,
         signupBonus: SIGNUP_BONUS,
@@ -119,6 +127,63 @@ export class ReferralService {
       referrerBonus: REFERRER_BONUS,
       result,
     };
+  }
+
+  /**
+   * Called at registration when a referralCode is provided.
+   * Creates the referral record and awards the signup bonus to the new user.
+   * The referrer bonus is deferred until the referred user makes their first trade.
+   */
+  async applyReferralAtRegistration(
+    referralCode: string,
+    newUserId: string
+  ): Promise<void> {
+    const referrerId = this.parseReferralCode(referralCode);
+    if (!referrerId || referrerId === newUserId) return;
+
+    const existing = await prisma.referral.findUnique({
+      where: { referrerId_referredUserId: { referrerId, referredUserId: newUserId } },
+    });
+    if (existing) return;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.referral.create({
+        data: {
+          referrerId,
+          referredUserId: newUserId,
+          referralCode,
+          referredSignupAt: new Date(),
+          signupBonusClaimed: true,
+          referrerBonusClaimed: false,
+        },
+      });
+      await tx.user.update({
+        where: { id: newUserId },
+        data: { usdcBalance: { increment: SIGNUP_BONUS } as any },
+      });
+    });
+  }
+
+  /**
+   * Called after the referred user's first trade.
+   * Awards the referrer bonus if not yet claimed.
+   */
+  async onFirstTrade(userId: string): Promise<void> {
+    const referral = await prisma.referral.findFirst({
+      where: { referredUserId: userId, referrerBonusClaimed: false },
+    });
+    if (!referral) return;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.referral.update({
+        where: { id: referral.id },
+        data: { referrerBonusClaimed: true },
+      });
+      await tx.user.update({
+        where: { id: referral.referrerId },
+        data: { usdcBalance: { increment: FIRST_TRADE_BONUS } as any },
+      });
+    });
   }
 }
 

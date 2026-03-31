@@ -409,6 +409,75 @@ impl PredictionMarketContract {
         todo!("Implement is_operator check")
     }
 
+    /// Set or revoke the Operator role for an address.
+    /// Only the admin can call this function.
+    ///
+    /// # Arguments
+    /// - `env` — contract environment
+    /// - `address` — the address to grant or revoke operator privileges to
+    /// - `active` — if `true`, grant the operator role; if `false`, revoke it
+    ///
+    /// # Errors
+    /// - `NotInitialized` if contract not bootstrapped
+    /// - `Unauthorized` if caller is not the admin
+    ///
+    /// # Events
+    /// - Emits `events::operator_set(address, active)`
+    pub fn set_operator(
+        env: Env,
+        address: Address,
+        active: bool,
+    ) -> Result<(), PredictionMarketError> {
+        let config = load_config(&env)?;
+
+        // Require auth from current admin
+        config.admin.require_auth();
+
+        if active {
+            // Grant operator role
+            env.storage()
+                .persistent()
+                .set(&DataKey::IsOperator(address.clone()), &true);
+        } else {
+            // Revoke operator role
+            env.storage()
+                .persistent()
+                .remove(&DataKey::IsOperator(address.clone()));
+        }
+
+        // Emit event
+        events::operator_set(&env, address, active);
+
+        Ok(())
+    }
+
+    /// Return the current state of the global emergency pause.
+    ///
+    /// # Returns
+    /// - `true` if emergency pause is active.
+    /// - `false` if the key is not set (default).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::EmergencyPause)
+            .unwrap_or(false)
+    }
+
+    /// Return the current market ID counter.
+    /// Indicates how many markets have been created.
+    ///
+    /// # Returns
+    /// - `u64` — the next market ID to be assigned.
+    ///
+    /// # Errors
+    /// - `NotInitialized` if the contract has not been bootstrapped.
+    pub fn get_next_market_id(env: Env) -> Result<u64, PredictionMarketError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextMarketId)
+            .ok_or(PredictionMarketError::NotInitialized)
+    }
+
     // =========================================================================
     // SECTION 4 — MARKET CREATION & CONFIGURATION
     // =========================================================================
@@ -1441,6 +1510,118 @@ impl PredictionMarketContract {
             total_fees,
             new_price_bps,
         })
+    }
+
+    /// Get a read-only quote for a buy or sell trade.
+    ///
+    /// This function does NOT mutate state. It is used for frontend previews.
+    pub fn get_trade_quote(
+        env: Env,
+        market_id: u64,
+        outcome_id: u32,
+        amount: i128,
+        is_buy: bool,
+    ) -> Result<TradeReceipt, PredictionMarketError> {
+        let config = load_config(&env)?;
+        
+        // Load market
+        let market: Market = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Market(market_id))
+            .ok_or(PredictionMarketError::MarketNotFound)?;
+
+        // Outcome validation
+        if (outcome_id as usize) >= market.outcomes.len() as usize {
+            return Err(PredictionMarketError::InvalidOutcome);
+        }
+
+        // Load AMM pool
+        let pool: AmmPool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AmmPool(market_id))
+            .ok_or(PredictionMarketError::PoolNotInitialized)?;
+
+        if is_buy {
+            // Calculate fees
+            let protocol_fee = amount
+                .checked_mul(config.fee_config.protocol_fee_bps as i128)
+                .and_then(|x| x.checked_div(10_000))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let lp_fee = amount
+                .checked_mul(config.fee_config.lp_fee_bps as i128)
+                .and_then(|x| x.checked_div(10_000))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let creator_fee = amount
+                .checked_mul(config.fee_config.creator_fee_bps as i128)
+                .and_then(|x| x.checked_div(10_000))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let total_fees = protocol_fee
+                .checked_add(lp_fee)
+                .and_then(|x| x.checked_add(creator_fee))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let net_collateral = amount
+                .checked_sub(total_fees)
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+
+            let shares_out = amm::calc_buy_shares(&pool, outcome_id as usize, net_collateral);
+            let avg_price_bps = ((amount
+                .checked_mul(10_000)
+                .ok_or(PredictionMarketError::ArithmeticError)?)
+                / shares_out)
+                .clamp(0, 10_000) as u32;
+            
+            let impact_bps = amm::calc_price_impact_bps(&pool, outcome_id as usize, net_collateral, true);
+
+            Ok(TradeReceipt {
+                collateral_delta: amount,
+                shares_delta: shares_out,
+                avg_price_bps,
+                total_fees,
+                new_price_bps: impact_bps,
+            })
+        } else {
+            // Sell logic
+            let gross_collateral = amm::calc_sell_collateral(&pool, outcome_id as usize, amount);
+            
+            // Calculate fees from payout
+            let protocol_fee = gross_collateral
+                .checked_mul(config.fee_config.protocol_fee_bps as i128)
+                .and_then(|x| x.checked_div(10_000))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let lp_fee = gross_collateral
+                .checked_mul(config.fee_config.lp_fee_bps as i128)
+                .and_then(|x| x.checked_div(10_000))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let creator_fee = gross_collateral
+                .checked_mul(config.fee_config.creator_fee_bps as i128)
+                .and_then(|x| x.checked_div(10_000))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let total_fees = protocol_fee
+                .checked_add(lp_fee)
+                .and_then(|x| x.checked_add(creator_fee))
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+            let net_collateral = gross_collateral
+                .checked_sub(total_fees)
+                .ok_or(PredictionMarketError::ArithmeticError)?;
+
+            let avg_price_bps = ((net_collateral
+                .checked_mul(10_000)
+                .ok_or(PredictionMarketError::ArithmeticError)?)
+                / amount)
+                .clamp(0, 10_000) as u32;
+
+            let impact_bps = amm::calc_price_impact_bps(&pool, outcome_id as usize, amount, false);
+
+            Ok(TradeReceipt {
+                collateral_delta: net_collateral,
+                shares_delta: amount,
+                avg_price_bps,
+                total_fees,
+                new_price_bps: impact_bps,
+            })
+        }
     }
 
     /// Sell outcome shares back to the AMM in exchange for collateral.

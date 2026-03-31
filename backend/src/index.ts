@@ -16,6 +16,7 @@ import leaderboardRoutes from './routes/leaderboard.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
 import walletRoutes from './routes/wallet.routes.js';
 import disputeRoutes from './routes/disputes.routes.js';
+import indexerRoutes from './routes/indexer.routes.js';
 
 // Import Redis initialization
 import {
@@ -25,13 +26,7 @@ import {
 } from './config/redis.js';
 
 // Import ALL middleware
-import {
-  securityHeaders,
-  corsMiddleware,
-  xssProtection,
-  frameGuard,
-  noCache,
-} from './middleware/security.middleware.js';
+import { securityHeaders, corsMiddleware } from './middleware/security.middleware.js';
 
 import { requestIdMiddleware } from './middleware/requestId.middleware.js';
 import { requestLogger } from './middleware/logging.middleware.js';
@@ -79,10 +74,6 @@ app.use(securityHeaders);
 // CORS configuration (using new middleware)
 app.use(corsMiddleware);
 
-// Additional security headers
-app.use(xssProtection);
-app.use(frameGuard);
-app.use(noCache);
 
 // Request parsing with limits
 app.use(express.json({ limit: '10mb' })); // Increased for blockchain operations
@@ -231,6 +222,10 @@ app.use('/api/trading', submitTxRoutes);
 import usersRoutes from './routes/users.routes.js';
 app.use('/api/users', usersRoutes);
 
+// Predictions routes (user predictions, issue #21)
+import predictionsRoutes from './routes/predictions.routes.js';
+app.use('/api/predictions', predictionsRoutes);
+
 // TODO: Add other routes as they are implemented
 // Referral routes
 app.use('/api/referrals', referralsRoutes);
@@ -246,6 +241,9 @@ app.use('/api/wallet', walletRoutes);
 
 // Dispute routes
 app.use('/api/disputes', disputeRoutes);
+
+// Indexer routes
+app.use('/api/indexer', indexerRoutes);
 
 // =============================================================================
 // ERROR HANDLING - UPDATED WITH NEW ERROR HANDLER

@@ -151,9 +151,7 @@ class DisputesController {
    * GET /api/disputes - List disputes (Admin only)
    */
   async listDisputes(req: AuthenticatedRequest, res: Response): Promise<void> {
- feature/auth-disputes-implementation
     try {
-      // Parse query parameters
       const options: DisputeListOptions = {
         status: req.query.status as DisputeStatus | undefined,
         marketId: req.query.marketId as string | undefined,
@@ -161,7 +159,6 @@ class DisputesController {
         limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
       };
 
-      // Validate pagination parameters
       if (options.page && (options.page < 1 || isNaN(options.page))) {
         res.status(400).json({ error: 'Page must be a positive integer' });
         return;
@@ -172,10 +169,9 @@ class DisputesController {
         return;
       }
 
-      // Validate status parameter
       if (options.status && !Object.values(DisputeStatus).includes(options.status)) {
-        res.status(400).json({ 
-          error: 'Invalid status. Must be one of: OPEN, REVIEWING, RESOLVED, DISMISSED' 
+        res.status(400).json({
+          error: 'Invalid status. Must be one of: OPEN, REVIEWING, RESOLVED, DISMISSED',
         });
         return;
       }
@@ -186,11 +182,6 @@ class DisputesController {
       logger.error('Error listing disputes', { error: error.message });
       res.status(400).json({ error: error.message });
     }
-
-    const status = req.query.status as DisputeStatus | undefined;
-    const disputes = await this.disputeService.listDisputes(status);
-    res.status(200).json({ success: true, data: disputes });
- main
   }
 }
 

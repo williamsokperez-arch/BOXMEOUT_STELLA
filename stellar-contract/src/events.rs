@@ -111,6 +111,17 @@ pub fn operator_revoked(env: &Env, address: Address) {
     env.events().publish((Symbol::new(env, "op_revoked"), address.clone()), (address,));
 }
 
+/// Emitted when an operator role is set (granted or revoked).
+///
+/// # Topics
+/// - [symbol!("op_set"), address]
+///
+/// # Data
+/// - (address: Address, active: bool)
+pub fn operator_set(env: &Env, address: Address, active: bool) {
+    env.events().publish((Symbol::new(env, "op_set"), address.clone()), (address, active));
+}
+
 // =============================================================================
 // MARKET LIFECYCLE EVENTS
 // =============================================================================

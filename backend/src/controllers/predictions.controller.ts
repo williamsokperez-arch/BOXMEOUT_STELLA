@@ -3,7 +3,11 @@
 
 import { Request, Response } from 'express';
 import { PredictionService } from '../services/prediction.service.js';
+import { PredictionRepository } from '../repositories/prediction.repository.js';
 import { AuthenticatedRequest } from '../types/auth.types.js';
+import { logger } from '../utils/logger.js';
+
+const predictionRepository = new PredictionRepository();
 
 class PredictionsController {
   private predictionService: PredictionService;
@@ -77,6 +81,105 @@ class PredictionsController {
       // ...
     } catch (error: any) {
       // ...
+    }
+  }
+  /**
+   * POST /api/predictions — place a prediction (tracking + leaderboard)
+   */
+  async placePrediction(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+        return;
+      }
+
+      const { marketId, outcomeId, confidence } = req.body;
+
+      const prediction = await this.predictionService.placePrediction(userId, marketId, outcomeId, confidence);
+
+      res.status(201).json({ success: true, data: prediction });
+    } catch (error: any) {
+      if (error.message === 'DUPLICATE_PREDICTION') {
+        res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'You have already predicted on this market' } });
+        return;
+      }
+      if (error.message === 'Market not found') {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Market not found' } });
+        return;
+      }
+      if (error.message === 'Market is not open for predictions') {
+        res.status(422).json({ success: false, error: { code: 'MARKET_CLOSED', message: error.message } });
+        return;
+      }
+      logger.error('PredictionsController.placePrediction error', { error });
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
+    }
+  }
+
+  /**
+   * GET /api/predictions — requires auth (issue #21)
+   * Returns paginated predictions for the authenticated user.
+   * Query: status (pending|won|lost), page, limit
+   */
+  async getUserPredictions(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+      }
+
+      const { status, page, limit } = req.query as any;
+
+      const { predictions, total } = await predictionRepository.findUserPredictionsPaginated(
+        userId,
+        { status, page: Number(page), limit: Number(limit) }
+      );
+
+      // Shape each prediction to include the required fields
+      const data = predictions.map((p: any) => {
+        const outcomeLabel =
+          p.predictedOutcome === null
+            ? null
+            : p.predictedOutcome === 1
+            ? p.market?.outcomeA ?? 'YES'
+            : p.market?.outcomeB ?? 'NO';
+
+        // Derive a simple status label
+        let statusLabel: string;
+        if (p.status === 'SETTLED') {
+          statusLabel = p.isWinner ? 'won' : 'lost';
+        } else {
+          statusLabel = 'pending';
+        }
+
+        return {
+          id: p.id,
+          marketId: p.marketId,
+          marketQuestion: p.market?.title ?? null,
+          outcomeLabel,
+          confidence: p.amountUsdc,       // amountUsdc serves as confidence proxy
+          pointsEarned: p.pnlUsd ?? null, // pnlUsd is points earned on settlement
+          status: statusLabel,
+          createdAt: p.createdAt,
+          settledAt: p.settledAt ?? null,
+        };
+      });
+
+      res.status(200).json({
+        success: true,
+        data,
+        meta: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Math.ceil(total / Number(limit)),
+        },
+      });
+    } catch (error: any) {
+      logger.error('PredictionsController.getUserPredictions error', { error });
+      res.status(500).json({ success: false, message: 'Internal server error' });
     }
   }
 }

@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
-import notificationsRoutes from '../notifications.routes.js';
-import { notificationService } from '../../services/notification.service.js';
+import notificationsRoutes from '../../src/routes/notifications.routes.js';
+import { notificationService } from '../../src/services/notification.service.js';
 
-vi.mock('../../services/notification.service.js', () => ({
+vi.mock('../../src/services/notification.service.js', () => ({
   notificationService: {
     getUserNotifications: vi.fn(),
     countUserNotifications: vi.fn(),
@@ -15,18 +15,18 @@ vi.mock('../../services/notification.service.js', () => ({
   },
 }));
 
-vi.mock('../../middleware/auth.middleware.js', () => ({
+vi.mock('../../src/middleware/auth.middleware.js', () => ({
   requireAuth: (req: any, _res: any, next: any) => {
     req.user = { userId: 'test-user-123', publicKey: 'test-key' };
     next();
   },
 }));
 
-vi.mock('../../utils/logger.js', () => ({
+vi.mock('../../src/utils/logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock('../../repositories/user.repository.js', () => ({
+vi.mock('../../src/repositories/user.repository.js', () => ({
   UserRepository: vi.fn().mockImplementation(() => ({
     findById: vi.fn().mockResolvedValue({
       id: 'test-user-123',

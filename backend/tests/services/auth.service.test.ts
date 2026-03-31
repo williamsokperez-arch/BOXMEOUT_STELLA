@@ -250,18 +250,18 @@ describe('AuthService - Refresh Token Rotation', () => {
     const refreshToken = signRefreshToken({ userId, tokenId });
 
     // Mock session exists but token is blacklisted
-    mockSessionService.getSession.mockResolvedValueOnce({
+    mockSessionService.getSession.mockResolvedValue({
       userId,
       tokenId,
       publicKey: 'GBXXXXXX',
       createdAt: Date.now(),
       expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
     });
-    mockSessionService.isTokenBlacklisted.mockResolvedValueOnce(true);
+    mockSessionService.isTokenBlacklisted.mockResolvedValue(true);
 
     // Refresh should fail due to blacklisted token
     await expect(authService.refresh(refreshToken)).rejects.toThrow(AuthError);
-    
+
     try {
       await authService.refresh(refreshToken);
     } catch (error) {

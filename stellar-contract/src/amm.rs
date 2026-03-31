@@ -504,10 +504,44 @@ pub fn calc_price_bps(pool: &AmmPool, outcome_id: usize) -> u32 {
 pub fn calc_price_impact_bps(
     pool: &AmmPool,
     outcome_id: usize,
-    collateral_in: i128,
+    amount_in: i128,
     is_buy: bool,
 ) -> u32 {
-    todo!("Compute price impact of a trade in basis points")
+    let price_before = calc_price_bps(pool, outcome_id);
+    if price_before == 0 {
+        return 0;
+    }
+
+    let n = pool.reserves.len() as usize;
+    if outcome_id >= n {
+        return 0;
+    }
+
+    let price_after = if is_buy {
+        // For buy, amount_in is net_collateral
+        let shares_out = calc_buy_shares(pool, outcome_id, amount_in);
+        let new_pool = update_reserves_buy(pool.clone(), outcome_id, amount_in, shares_out);
+        calc_price_bps(&new_pool, outcome_id)
+    } else {
+        // For sell, amount_in is shares_in
+        let collateral_out = calc_sell_collateral(pool, outcome_id, amount_in);
+        let new_pool = update_reserves_sell(pool.clone(), outcome_id, amount_in, collateral_out);
+        calc_price_bps(&new_pool, outcome_id)
+    };
+
+    let diff = if price_after > price_before {
+        price_after - price_before
+    } else {
+        price_before - price_after
+    };
+
+    // impact = diff * 10_000 / price_before
+    let impact = (diff as i128)
+        .checked_mul(10_000)
+        .and_then(|x| x.checked_div(price_before as i128))
+        .unwrap_or(0);
+
+    impact.clamp(0, 10_000) as u32
 }
 
 // =============================================================================

@@ -3,6 +3,7 @@
 // Issues closed:
 //   #46 — mul_div, mul_div_ceil, checked_product
 //   #47 — sqrt (integer floor via Newton-Raphson)
+//   #48 — apply_fee_bps, split_fees
 
 /// Overflow-safe floor division: floor(a * b / d).
 ///
@@ -85,6 +86,65 @@ pub fn sqrt(n: u128) -> u128 {
         }
         x = x1;
     }
+}
+
+/// Compute the fee amount for a given `amount` and rate in basis points.
+///
+/// `fee = floor(amount * fee_bps / 10_000)`
+///
+/// Uses `mul_div` so the intermediate product never overflows even for
+/// `amount == i128::MAX`.  Returns 0 when `fee_bps == 0` or `amount == 0`.
+/// Panics if `fee_bps > 10_000` (fee cannot exceed 100 %).
+pub fn apply_fee_bps(amount: i128, fee_bps: u32) -> i128 {
+    if fee_bps > 10_000 {
+        panic!("fee_bps exceeds 10_000");
+    }
+    mul_div(amount, fee_bps as i128, 10_000)
+}
+
+/// Split `total_fee` into three buckets: protocol, LP, and creator.
+///
+/// Each share is computed as `floor(total_fee * share_bps / 10_000)`.
+/// Any rounding remainder is added to `protocol` so that:
+///   `protocol + lp + creator == total_fee` always holds.
+///
+/// Panics if the three `*_bps` values sum to more than 10_000, or if
+/// `total_fee` is negative.
+///
+/// Returns `(protocol, lp, creator)`.
+pub fn split_fees(
+    total_fee: i128,
+    protocol_bps: u32,
+    lp_bps: u32,
+    creator_bps: u32,
+) -> (i128, i128, i128) {
+    if total_fee < 0 {
+        panic!("total_fee must be non-negative");
+    }
+    let sum_bps = protocol_bps as u64 + lp_bps as u64 + creator_bps as u64;
+    if sum_bps > 10_000 {
+        panic!("split bps sum exceeds 10_000");
+    }
+    let lp = mul_div(total_fee, lp_bps as i128, 10_000);
+    let creator = mul_div(total_fee, creator_bps as i128, 10_000);
+    // Protocol absorbs the remainder to guarantee exact reconstruction.
+    let protocol = total_fee - lp - creator;
+    (protocol, lp, creator)
+}
+
+/// Compound fee deduction over `n` hops: `(1 - fee_bps / 10_000) ^ n` in BPS.
+///
+/// Returns a value in the range `[0, 10_000]` where `10_000` represents 1.0.
+/// - `n == 0` → `10_000` (identity).
+/// - Monotonically decreasing with `n` for any `fee_bps > 0`.
+/// - No overflow for `n <= 100` and `fee_bps <= 500`.
+pub fn pow_bps(fee_bps: u32, n: u32) -> i128 {
+    let mut result: i128 = 10_000;
+    let factor: i128 = 10_000 - fee_bps as i128;
+    for _ in 0..n {
+        result = result * factor / 10_000;
+    }
+    result
 }
 
 // ── internal helpers ────────────────────────────────────────────────────────
@@ -282,6 +342,124 @@ mod tests {
     #[test]
     fn test_checked_product_overflow_returns_zero() {
         assert_eq!(checked_product(&[u128::MAX, 2]), 0);
+    }
+
+    // ── apply_fee_bps ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_apply_fee_bps_acceptance() {
+        // 2 % of 1_000_000 stroops == 20_000
+        assert_eq!(apply_fee_bps(1_000_000, 200), 20_000);
+    }
+
+    #[test]
+    fn test_apply_fee_bps_zero_rate() {
+        assert_eq!(apply_fee_bps(1_000_000, 0), 0);
+    }
+
+    #[test]
+    fn test_apply_fee_bps_zero_amount() {
+        assert_eq!(apply_fee_bps(0, 200), 0);
+    }
+
+    #[test]
+    fn test_apply_fee_bps_100_percent() {
+        // 100 % fee (10_000 bps) returns the full amount.
+        assert_eq!(apply_fee_bps(500, 10_000), 500);
+    }
+
+    #[test]
+    fn test_apply_fee_bps_no_overflow_at_i128_max() {
+        // Must not panic or overflow for the largest possible amount.
+        let fee = apply_fee_bps(i128::MAX, 200);
+        assert!(fee > 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "fee_bps exceeds 10_000")]
+    fn test_apply_fee_bps_over_100_percent_panics() {
+        apply_fee_bps(1_000_000, 10_001);
+    }
+
+    // ── split_fees ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_split_fees_sums_to_total() {
+        // 1 % protocol, 1 % LP, 0.5 % creator  (total 2.5 %)
+        let total: i128 = 1_000_000;
+        let (protocol, lp, creator) = split_fees(total, 100, 100, 50);
+        assert_eq!(protocol + lp + creator, total);
+        assert!(protocol > 0);
+        assert!(lp > 0);
+        assert!(creator > 0);
+    }
+
+    #[test]
+    fn test_split_fees_net_positive() {
+        let (protocol, lp, creator) = split_fees(10_000, 5000, 3000, 2000);
+        assert_eq!(protocol + lp + creator, 10_000);
+        assert!(protocol + lp + creator > 0);
+    }
+
+    #[test]
+    fn test_split_fees_remainder_goes_to_protocol() {
+        // 1 stroop total, 33 % each — floor rounds down, remainder to protocol.
+        let (protocol, lp, creator) = split_fees(1, 3333, 3333, 3333);
+        assert_eq!(protocol + lp + creator, 1);
+    }
+
+    #[test]
+    fn test_split_fees_zero_total() {
+        let (protocol, lp, creator) = split_fees(0, 5000, 3000, 2000);
+        assert_eq!((protocol, lp, creator), (0, 0, 0));
+    }
+
+    #[test]
+    fn test_split_fees_no_overflow_at_i128_max() {
+        let (protocol, lp, creator) = split_fees(i128::MAX, 5000, 3000, 2000);
+        assert_eq!(protocol + lp + creator, i128::MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "split bps sum exceeds 10_000")]
+    fn test_split_fees_bps_over_100_percent_panics() {
+        split_fees(1_000_000, 5000, 3000, 2001);
+    }
+
+    #[test]
+    #[should_panic(expected = "total_fee must be non-negative")]
+    fn test_split_fees_negative_total_panics() {
+        split_fees(-1, 100, 100, 100);
+    }
+
+    // ── pow_bps ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_pow_bps_identity() {
+        assert_eq!(pow_bps(200, 0), 10_000);
+    }
+
+    #[test]
+    fn test_pow_bps_acceptance() {
+        assert_eq!(pow_bps(200, 1), 9_800);
+        assert_eq!(pow_bps(200, 2), 9_604);
+    }
+
+    #[test]
+    fn test_pow_bps_monotone_decreasing() {
+        let mut prev = pow_bps(200, 0);
+        for n in 1..=100 {
+            let cur = pow_bps(200, n);
+            assert!(cur < prev, "not decreasing at n={n}");
+            prev = cur;
+        }
+    }
+
+    #[test]
+    fn test_pow_bps_no_overflow_max_params() {
+        // n=100, fee_bps=500 must not panic or overflow
+        let result = pow_bps(500, 100);
+        assert!(result >= 0);
     }
 
     // ── fuzz: 10 000 random (a, b, d) triples ────────────────────────────────

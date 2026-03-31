@@ -35,6 +35,26 @@ export class TreasuryController {
         success: false,
         error: { code: 'TREASURY_ERROR', message: error instanceof Error ? error.message : 'Failed to fetch history' },
       });
+  async collectProtocolFees(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+        return;
+      }
+
+      const { marketId } = req.params;
+      const result = await this.treasuryService.collectProtocolFees(marketId, req.user.userId);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      const code = (error as any).code;
+      if (code === 'NOT_FOUND') {
+        res.status(404).json({ success: false, error: { code, message: (error as Error).message } });
+      } else if (code === 'INVALID_STATE' || code === 'EMPTY_POOL') {
+        res.status(400).json({ success: false, error: { code, message: (error as Error).message } });
+      } else {
+        (req.log || logger).error('Collect protocol fees error', { error });
+        res.status(500).json({ success: false, error: { code: 'TREASURY_ERROR', message: error instanceof Error ? error.message : 'Failed to collect fees' } });
+      }
     }
   }
 

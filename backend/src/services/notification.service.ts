@@ -104,6 +104,8 @@ export class NotificationService {
       case NotificationType.ACHIEVEMENT:
       case NotificationType.TIER_UPGRADE:
         return user.notifyAchievements ?? true;
+      case NotificationType.TRADE_FILLED:
+        return user.notifyTradeFilled ?? true;
       case NotificationType.SYSTEM:
         return true; // Always send system notifications
       default:
@@ -286,8 +288,12 @@ export class NotificationService {
     );
   }
 
-  async getUserNotifications(userId: string, limit?: number) {
-    return await this.notificationRepository.findByUserId(userId, limit);
+  async getUserNotifications(userId: string, limit?: number, offset?: number) {
+    return await this.notificationRepository.findByUserId(userId, limit, offset);
+  }
+
+  async countUserNotifications(userId: string) {
+    return await this.notificationRepository.countByUserId(userId);
   }
 
   async markRead(notificationId: string) {
@@ -312,6 +318,7 @@ export class NotificationService {
       notifyMarketResolution?: boolean;
       notifyWinnings?: boolean;
       notifyAchievements?: boolean;
+      notifyTradeFilled?: boolean;
       emailNotifications?: boolean;
     }
   ) {

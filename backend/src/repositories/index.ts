@@ -10,5 +10,4 @@ export { NotificationRepository } from './notification.repository.js';
 export { LeaderboardRepository } from './leaderboard.repository.js';
 export { DisputeRepository } from './dispute.repository.js';
 export { DistributionRepository } from './distribution.repository.js';
-export { DistributionRepository } from './distribution.repository.js';
 export { TreasuryDistributionRepository } from './treasury-distribution.repository.js';

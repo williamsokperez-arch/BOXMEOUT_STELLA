@@ -1169,10 +1169,41 @@ impl AMM {
         (yes_price, no_price)
     }
 
-    // TODO: Implement remaining AMM functions
-    // - get_lp_position() / claim_lp_fees()
-    // - calculate_spot_price()
-    // - get_trade_history()
+    /// CPMM spot price for a given outcome index (0 = NO, 1 = YES).
+    ///
+    /// Returns the outcome's reserve divided by the total pool, expressed in
+    /// fixed-point with 7-decimal precision (scale = 10_000_000).
+    ///
+    /// - Returns 0 if the pool is not initialised or has zero liquidity.
+    /// - For a binary pool with equal reserves the two prices each equal
+    ///   5_000_000 (0.5000000) and their sum is exactly 10_000_000 (1.0).
+    pub fn calc_spot_price(env: Env, market_id: BytesN<32>, outcome: u32) -> u128 {
+        const SCALE: u128 = 10_000_000;
+
+        let pool_exists_key = (Symbol::new(&env, POOL_EXISTS_KEY), market_id.clone());
+        if !env.storage().persistent().has(&pool_exists_key) {
+            return 0;
+        }
+
+        let yes_reserve: u128 = env
+            .storage()
+            .persistent()
+            .get(&(Symbol::new(&env, POOL_YES_RESERVE_KEY), market_id.clone()))
+            .unwrap_or(0);
+        let no_reserve: u128 = env
+            .storage()
+            .persistent()
+            .get(&(Symbol::new(&env, POOL_NO_RESERVE_KEY), market_id.clone()))
+            .unwrap_or(0);
+
+        let total = yes_reserve + no_reserve;
+        if total == 0 {
+            return 0;
+        }
+
+        let reserve = if outcome == 1 { yes_reserve } else { no_reserve };
+        crate::math::mul_div(reserve as i128, SCALE as i128, total as i128) as u128
+    }
 
     /// Calculate LP shares to mint for a new collateral deposit.
     ///
@@ -1227,6 +1258,52 @@ impl AMM {
             total_collateral as i128,
             total_lp_supply as i128,
         ) as u128
+    }
+
+    /// Split `collateral` equally across `n` outcome buckets.
+    ///
+    /// Returns a `Vec`-like fixed array as a `soroban_sdk::Vec<u128>` is not
+    /// available in `no_std`; instead returns `(reserve_per_outcome, n)` as a
+    /// plain tuple so callers can reconstruct the full reserve list.
+    ///
+    /// Panics if `n < 2` or `collateral == 0`.
+    pub fn calc_initial_reserves(collateral: u128, n: u32) -> u128 {
+        if n < 2 {
+            panic!("n must be >= 2");
+        }
+        if collateral == 0 {
+            panic!("collateral must be > 0");
+        }
+        collateral / n as u128
+    }
+
+    /// Initial LP shares for a freshly seeded pool.
+    ///
+    /// Computes `sqrt(product_of_reserves)` using `math::sqrt` and
+    /// `math::checked_product`. Supports up to 32 outcomes (stack-allocated).
+    ///
+    /// Panics if `n > 32` or the product overflows.
+    pub fn calc_initial_lp_shares(reserve_per_outcome: u128, n: u32) -> u128 {
+        if n as usize > 32 {
+            panic!("n exceeds maximum supported outcomes");
+        }
+        let mut buf = [0u128; 32];
+        for i in 0..n as usize {
+            buf[i] = reserve_per_outcome;
+        }
+        let product = crate::math::checked_product(&buf[..n as usize]);
+        if product == 0 && reserve_per_outcome != 0 {
+            panic!("product overflow computing initial LP shares");
+        }
+        crate::math::sqrt(product)
+    }
+
+    /// CPMM invariant k = product of all reserves.
+    ///
+    /// Uses `math::checked_product` for overflow safety.
+    /// Returns 0 on overflow (caller should treat as invalid).
+    pub fn compute_invariant(reserves: &[u128]) -> u128 {
+        crate::math::checked_product(reserves)
     }
 }
 
@@ -1399,4 +1476,123 @@ mod tests {
     fn test_calc_collateral_zero_supply_panics() {
         AMM::calc_collateral_from_lp(100, 1_000_000, 0);
     }
-}
+
+    // ── Issue: calc_initial_reserves / calc_initial_lp_shares / compute_invariant
+
+    #[test]
+    fn test_calc_initial_reserves_binary_50_50() {
+        // 100 USDC into a binary (n=2) market → 50 per outcome.
+        let reserve = AMM::calc_initial_reserves(100, 2);
+        assert_eq!(reserve, 50);
+    }
+
+    #[test]
+    fn test_calc_initial_reserves_n_outcomes() {
+        // 300 collateral, 3 outcomes → 100 each.
+        let reserve = AMM::calc_initial_reserves(300, 3);
+        assert_eq!(reserve, 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "n must be >= 2")]
+    fn test_calc_initial_reserves_n_less_than_2_panics() {
+        AMM::calc_initial_reserves(100, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "collateral must be > 0")]
+    fn test_calc_initial_reserves_zero_collateral_panics() {
+        AMM::calc_initial_reserves(0, 2);
+    }
+
+    #[test]
+    fn test_calc_initial_lp_shares_binary() {
+        // 100 USDC → 50/50 reserves → sqrt(50 * 50) = 50.
+        let reserve = AMM::calc_initial_reserves(100, 2);
+        let lp = AMM::calc_initial_lp_shares(reserve, 2);
+        assert_eq!(lp, 50);
+    }
+
+    #[test]
+    fn test_compute_invariant_binary() {
+        // k = 50 * 50 = 2500.
+        let k = AMM::compute_invariant(&[50, 50]);
+        assert_eq!(k, 2500);
+    }
+
+    #[test]
+    fn test_compute_invariant_overflow_returns_zero() {
+        let k = AMM::compute_invariant(&[u128::MAX, 2]);
+        assert_eq!(k, 0);
+    }
+
+    /// Acceptance test: 100 USDC binary market → 50/50 reserves → price = 50% each.
+    #[test]
+    fn test_binary_market_init_100_usdc_50_50_price() {
+        let collateral: u128 = 100;
+        let n: u32 = 2;
+
+        // Step 1: split collateral.
+        let reserve = AMM::calc_initial_reserves(collateral, n);
+        assert_eq!(reserve, 50, "each outcome reserve must be 50");
+
+        // Step 2: compute invariant k.
+        let k = AMM::compute_invariant(&[reserve, reserve]);
+        assert_eq!(k, 2500);
+
+        // Step 3: initial LP shares = sqrt(k) = sqrt(50*50) = 50.
+        let lp = AMM::calc_initial_lp_shares(reserve, n);
+        assert_eq!(lp, 50);
+
+        // Step 4: price of each outcome = reserve / total = 50/100 = 50%.
+        let total = reserve * n as u128;
+        let price_bps = (reserve * 10_000) / total; // basis points
+        assert_eq!(price_bps, 5_000, "price must be 50% (5000 bps)");
+    }
+
+    // ── calc_spot_price ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_calc_spot_price_uninitialized_pool_returns_zero() {
+        let env = Env::default();
+        let amm_id = env.register(AMM, ());
+        let amm = AMMClient::new(&env, &amm_id);
+        let market_id = BytesN::from_array(&env, &[99u8; 32]);
+        assert_eq!(amm.calc_spot_price(&market_id, &0u32), 0);
+        assert_eq!(amm.calc_spot_price(&market_id, &1u32), 0);
+    }
+
+    #[test]
+    fn test_calc_spot_price_equal_reserves_binary() {
+        // Equal reserves → each outcome price = 0.5000000 (5_000_000 / 10_000_000).
+        let env = Env::default();
+        let (amm, _usdc, _lp, _admin, market_id) = setup_amm_pool(&env);
+
+        let price_no = amm.calc_spot_price(&market_id, &0u32);
+        let price_yes = amm.calc_spot_price(&market_id, &1u32);
+
+        assert_eq!(price_no, 5_000_000, "NO price must be 0.5 (5_000_000)");
+        assert_eq!(price_yes, 5_000_000, "YES price must be 0.5 (5_000_000)");
+        assert_eq!(price_no + price_yes, 10_000_000, "prices must sum to 1.0");
+    }
+
+    #[test]
+    fn test_calc_spot_price_sum_equals_one_after_trade() {
+        // After a buy the prices shift but must still sum to 1.0 (within rounding).
+        let env = Env::default();
+        let (amm, usdc, _lp, _admin, market_id) = setup_amm_pool(&env);
+
+        let buyer = Address::generate(&env);
+        usdc.mint(&buyer, &100_000i128);
+        amm.buy_shares(&buyer, &market_id, &1u32, &100_000u128, &0u128);
+
+        let price_no = amm.calc_spot_price(&market_id, &0u32);
+        let price_yes = amm.calc_spot_price(&market_id, &1u32);
+        let sum = price_no + price_yes;
+
+        // Allow ±1 rounding error.
+        assert!(
+            sum == 10_000_000 || sum == 9_999_999 || sum == 10_000_001,
+            "prices must sum to ~1.0, got {sum}"
+        );
+    }

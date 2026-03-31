@@ -153,6 +153,34 @@ export class TreasuryService extends BaseBlockchainService {
     }
   }
 
+  async collectProtocolFees(marketId: string): Promise<{ txHash: string; amountCollected: string }> {
+    if (!this.treasuryContractId) throw new Error('Treasury contract address not configured');
+    if (!this.adminKeypair) throw new Error('ADMIN_WALLET_SECRET not configured');
+
+    const contract = new Contract(this.treasuryContractId);
+    const sourceAccount = await this.rpcServer.getAccount(this.adminKeypair.publicKey());
+
+    const builtTransaction = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(contract.call('collect_protocol_fees', nativeToScVal(marketId, { type: 'symbol' })))
+      .setTimeout(30)
+      .build();
+
+    const preparedTransaction = await this.rpcServer.prepareTransaction(builtTransaction);
+    preparedTransaction.sign(this.adminKeypair);
+
+    const response = await this.rpcServer.sendTransaction(preparedTransaction);
+    if (response.status !== 'PENDING') throw new Error('Transaction submission failed');
+
+    const txHash = response.hash;
+    const result = await this.waitForTransaction(txHash, 'collectProtocolFees', { marketId });
+
+    const amountCollected = result && scValToNative((result as any).returnValue)?.toString() || '0';
+    return { txHash, amountCollected };
+  }
+
   async distributeCreator(
     marketId: string,
     creatorAddress: string,

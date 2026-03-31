@@ -12,6 +12,7 @@ import {
   LeaderboardService,
 } from './leaderboard.service.js';
 import { achievementService } from './achievement.service.js';
+import { PredictionService } from './prediction.service.js';
 
 export class MarketService {
   private marketRepository: MarketRepository;
@@ -146,7 +147,7 @@ export class MarketService {
   }
 
   async getMarketDetails(marketId: string) {
-    const market = await this.marketRepository.findById(marketId);
+    const market = await this.marketRepository.findByIdWithDetails(marketId);
     if (!market) {
       throw new Error('Market not found');
     }
@@ -245,6 +246,35 @@ export class MarketService {
     return resolvedMarket;
   }
 
+  async reportMarketOutcome(
+    marketId: string,
+    winningOutcome: number,
+    resolutionSource: string
+  ) {
+    const market = await this.marketRepository.findById(marketId);
+    if (!market) {
+      throw new Error('Market not found');
+    }
+
+    if (market.status !== MarketStatus.CLOSED) {
+      throw new Error(`Market must be CLOSED to report outcome. Current status: ${market.status}`);
+    }
+
+    if (winningOutcome !== 0 && winningOutcome !== 1) {
+      throw new Error('Winning outcome must be 0 or 1');
+    }
+
+    // Update market status to REPORTED
+    return await this.marketRepository.updateMarketStatus(
+      marketId,
+      MarketStatus.REPORTED,
+      {
+        winningOutcome,
+        resolutionSource,
+      }
+    );
+  }
+
   async markWinningsClaimed(marketId: string, userId: string) {
     const prediction = await this.predictionRepository.findByUserAndMarket(
       userId,
@@ -280,79 +310,9 @@ export class MarketService {
   }
 
   private async settlePredictions(marketId: string, winningOutcome: number) {
-    const market = await this.marketRepository.findById(marketId);
-    if (!market) throw new Error('Market not found');
-
-    const predictions =
-      await this.predictionRepository.findMarketPredictions(marketId);
-
-    await executeTransaction(async (tx) => {
-      const predictionRepo = new PredictionRepository(tx);
-
-      for (const prediction of predictions) {
-        const isWinner = prediction.predictedOutcome === winningOutcome;
-
-        // Calculate PnL (simplified - actual calculation would involve odds)
-        const pnlUsd = isWinner
-          ? Number(prediction.amountUsdc) * 0.9 // 90% return (10% fee)
-          : -Number(prediction.amountUsdc);
-
-        await predictionRepo.settlePrediction(prediction.id, isWinner, pnlUsd);
-      }
-    });
-
-    // Evaluate tier promotion for all participants after settlement
-    const userIds = [...new Set(predictions.map((p) => p.userId))];
-    logger.info('Evaluating tier updates after market resolution', {
-      marketId,
-      userCount: userIds.length,
-    });
-
-    for (const userId of userIds) {
-      try {
-        await this.userService.calculateAndUpdateTier(userId);
-
-        // Find predictions for this specific user to calculate their total PNL for this market
-        const userPredictions = predictions.filter((p) => p.userId === userId);
-        let totalUserPnl = 0;
-        let hasWin = false;
-
-        for (const p of userPredictions) {
-          const isWinner = p.predictedOutcome === winningOutcome;
-          if (isWinner) hasWin = true;
-
-          const pnlUsd = isWinner
-            ? Number(p.amountUsdc) * 0.9
-            : -Number(p.amountUsdc);
-          totalUserPnl += pnlUsd;
-        }
-
-        await this.leaderboardService.handleSettlement(
-          userId,
-          marketId,
-          market.category,
-          totalUserPnl,
-          hasWin
-        );
-
-        // Trigger achievement checks after settlement (non-blocking)
-        achievementService.checkAndAward(userId).catch((err) =>
-          logger.error('Achievement check failed post-settlement', {
-            userId,
-            marketId,
-            error: err,
-          })
-        );
-      } catch (error) {
-        logger.error('Failed to update tier or leaderboard for user', {
-          userId,
-          error,
-        });
-      }
-    }
-
-    // Recalculate all rankings after settlement
-    await this.leaderboardService.calculateRanks();
+    // Delegate to PredictionService which handles settlement, leaderboard, and notifications (issue #20)
+    const predictionService = new PredictionService();
+    await predictionService.settleMarketPredictions(marketId, winningOutcome);
   }
 
   async cancelMarket(marketId: string, creatorId: string) {

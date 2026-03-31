@@ -30,6 +30,81 @@ const depositConfirmRateLimiter = createRateLimiter({
 
 /**
  * @swagger
+ * /api/wallet/deposit:
+ *   post:
+ *     summary: Initiate a deposit (async, 202)
+ *     tags: [Wallet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [amount]
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 minimum: 0.0000001
+ *               txHash:
+ *                 type: string
+ *                 description: Optional — Stellar tx hash to verify immediately
+ *     responses:
+ *       202:
+ *         description: Deposit accepted for processing
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+router.post(
+  '/deposit',
+  requireAuth,
+  depositInitiateRateLimiter,
+  (req: Request, res: Response, next: NextFunction) => {
+    walletController.deposit(req as AuthenticatedRequest, res).catch(next);
+  }
+);
+
+/**
+ * @swagger
+ * /api/wallet/withdraw:
+ *   post:
+ *     summary: Withdraw USDC to connected wallet (async, 202)
+ *     tags: [Wallet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [amount]
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 minimum: 0.0000001
+ *     responses:
+ *       202:
+ *         description: Withdrawal accepted for processing
+ *       400:
+ *         description: Invalid amount or insufficient balance
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ */
+router.post(
+  '/withdraw',
+  requireAuth,
+  withdrawalRateLimiter,
+  (req: Request, res: Response, next: NextFunction) => {
+    walletController.withdrawAsync(req as AuthenticatedRequest, res).catch(next);
+  }
+);
+
+/**
+ * @swagger
  * /api/wallet/deposit/initiate:
  *   post:
  *     summary: Initiate a USDC deposit
@@ -322,3 +397,5 @@ router.get(
     walletController.getTransactions(req as AuthenticatedRequest, res).catch(next);
   }
 );
+
+export default router;

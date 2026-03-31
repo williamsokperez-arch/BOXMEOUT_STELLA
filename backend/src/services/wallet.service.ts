@@ -6,11 +6,15 @@ import { prisma } from '../database/prisma.js';
 import { stellarService } from './stellar.service.js';
 import { ApiError } from '../middleware/error.middleware.js';
 import { logger } from '../utils/logger.js';
-import { TransactionStatus, TransactionType } from '@prisma/client';
+import { TransactionStatus, TransactionType, NotificationType } from '@prisma/client';
 import { notifyBalanceUpdated } from '../websocket/realtime.js';
+import { notificationService } from './notification.service.js';
 
 // ─── Platform deposit address ─────────────────────────────────────────────────
-const PLATFORM_DEPOSIT_ADDRESS = process.env.PLATFORM_DEPOSIT_ADDRESS || '';
+// Read dynamically so tests can override via process.env
+function getPlatformDepositAddress(): string {
+  return process.env.PLATFORM_DEPOSIT_ADDRESS || '';
+}
 
 export interface WithdrawParams {
   userId: string;
@@ -44,7 +48,237 @@ export interface ConfirmDepositResult {
 
 export class WalletService {
   // ==========================================================================
-  // DEPOSIT
+  // POST /wallet/deposit  — async deposit initiation (202 Accepted)
+  // ==========================================================================
+
+  /**
+   * Initiate a deposit and return a pending transaction ID immediately (202).
+   * The caller polls or waits for a WebSocket event to confirm crediting.
+   *
+   * Flow:
+   * 1. Validate amount > 0
+   * 2. Create a PENDING Transaction record
+   * 3. Trigger on-chain verification asynchronously (fire-and-forget)
+   * 4. Return { transactionId, depositAddress, memo } immediately
+   */
+  async deposit(params: { userId: string; amount: number; txHash?: string }): Promise<{
+    transactionId: string;
+    depositAddress: string;
+    memo: string;
+    status: string;
+  }> {
+    const { userId, amount, txHash } = params;
+
+    if (!amount || amount <= 0) {
+      throw new ApiError(400, 'INVALID_AMOUNT', 'Amount must be greater than 0');
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new ApiError(404, 'USER_NOT_FOUND', 'User not found');
+
+    if (!getPlatformDepositAddress()) {
+      throw new ApiError(503, 'DEPOSIT_UNAVAILABLE', 'Deposit service is not configured');
+    }
+
+    const memo = `dep:${userId.slice(0, 8)}`;
+
+    // Create a PENDING transaction record immediately
+    const tx = await prisma.transaction.create({
+      data: {
+        userId,
+        txType: TransactionType.DEPOSIT,
+        amountUsdc: amount,
+        status: TransactionStatus.PENDING,
+        txHash: txHash ?? `pending-${userId.slice(0, 8)}-${Date.now()}`,
+        fromAddress: user.walletAddress ?? 'unknown',
+        toAddress: getPlatformDepositAddress(),
+      },
+    });
+
+    // If a txHash was provided, verify and credit asynchronously
+    if (txHash) {
+      this._processDepositAsync(userId, tx.id, txHash, amount).catch((err) =>
+        logger.error('Async deposit processing failed', { userId, txHash, err })
+      );
+    }
+
+    logger.info('Deposit initiated (async)', { userId, transactionId: tx.id, amount });
+
+    return {
+      transactionId: tx.id,
+      depositAddress: getPlatformDepositAddress(),
+      memo,
+      status: 'PENDING',
+    };
+  }
+
+  /** Background: verify on-chain, credit balance, notify. */
+  private async _processDepositAsync(
+    userId: string,
+    transactionId: string,
+    txHash: string,
+    amount: number
+  ): Promise<void> {
+    try {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) return;
+
+      const verification = await this.verifyDepositTx({
+        txHash,
+        expectedSender: user.walletAddress ?? '',
+        expectedMemo: `dep:${userId.slice(0, 8)}`,
+      });
+
+      if (!verification.valid) {
+        await prisma.transaction.update({
+          where: { id: transactionId },
+          data: { status: TransactionStatus.FAILED, failedReason: verification.reason },
+        });
+        notificationService.createNotification(
+          userId, NotificationType.SYSTEM,
+          'Deposit Failed', verification.reason ?? 'Deposit could not be verified'
+        ).catch(() => {});
+        return;
+      }
+
+      const credited = verification.amount ?? amount;
+
+      const updatedUser = await prisma.$transaction(async (tx) => {
+        await tx.transaction.update({
+          where: { id: transactionId },
+          data: { status: TransactionStatus.CONFIRMED, amountUsdc: credited, confirmedAt: new Date(), txHash },
+        });
+        return tx.user.update({
+          where: { id: userId },
+          data: { usdcBalance: { increment: credited } },
+        });
+      });
+
+      const newBalance = new Decimal(updatedUser.usdcBalance.toString()).toNumber();
+      notifyBalanceUpdated(userId, { usdcBalance: newBalance, reason: 'deposit', amountDelta: credited });
+      notificationService.createNotification(
+        userId, NotificationType.SYSTEM,
+        'Deposit Confirmed', `${credited} USDC has been credited to your account`
+      ).catch(() => {});
+    } catch (err) {
+      logger.error('_processDepositAsync error', { userId, transactionId, err });
+      await prisma.transaction.update({
+        where: { id: transactionId },
+        data: { status: TransactionStatus.FAILED, failedReason: 'Internal processing error' },
+      }).catch(() => {});
+    }
+  }
+
+  // ==========================================================================
+  // POST /wallet/withdraw  — async withdrawal (202 Accepted)
+  // ==========================================================================
+
+  /**
+   * Initiate a withdrawal and return 202 immediately.
+   * Validates balance, creates PENDING record, submits on-chain async.
+   */
+  async withdrawAsync(params: { userId: string; amount: number }): Promise<{
+    transactionId: string;
+    status: string;
+    amountRequested: number;
+  }> {
+    const { userId, amount } = params;
+
+    if (!amount || amount <= 0) {
+      throw new ApiError(400, 'INVALID_AMOUNT', 'Amount must be greater than 0');
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new ApiError(404, 'USER_NOT_FOUND', 'User not found');
+
+    if (!user.walletAddress) {
+      throw new ApiError(400, 'WALLET_NOT_CONNECTED', 'No wallet connected to this account');
+    }
+
+    const currentBalance = new Decimal(user.usdcBalance.toString());
+    if (new Decimal(amount).greaterThan(currentBalance)) {
+      throw new ApiError(
+        400, 'INSUFFICIENT_BALANCE',
+        `Insufficient balance. Available: ${currentBalance.toFixed(2)}, Requested: ${amount}`
+      );
+    }
+
+    // Reserve balance immediately to prevent double-spend
+    const tx = await prisma.$transaction(async (db) => {
+      await db.user.update({
+        where: { id: userId },
+        data: { usdcBalance: { decrement: amount } },
+      });
+      return db.transaction.create({
+        data: {
+          userId,
+          txType: TransactionType.WITHDRAW,
+          amountUsdc: amount,
+          status: TransactionStatus.PENDING,
+          txHash: `pending-withdraw-${userId.slice(0, 8)}-${Date.now()}`,
+          fromAddress: getPlatformDepositAddress() || 'platform',
+          toAddress: user.walletAddress!,
+        },
+      });
+    });
+
+    logger.info('Withdrawal initiated (async)', { userId, transactionId: tx.id, amount });
+
+    // Submit on-chain asynchronously
+    this._processWithdrawAsync(userId, tx.id, user.walletAddress, amount).catch((err) =>
+      logger.error('Async withdrawal processing failed', { userId, err })
+    );
+
+    return { transactionId: tx.id, status: 'PENDING', amountRequested: amount };
+  }
+
+  /** Background: submit on-chain, update record, notify. */
+  private async _processWithdrawAsync(
+    userId: string,
+    transactionId: string,
+    walletAddress: string,
+    amount: number
+  ): Promise<void> {
+    try {
+      const { txHash } = await stellarService.sendUsdc(
+        walletAddress,
+        new Decimal(amount).toFixed(7),
+        `withdraw:${userId.slice(0, 8)}`
+      );
+
+      const updatedUser = await prisma.$transaction(async (db) => {
+        await db.transaction.update({
+          where: { id: transactionId },
+          data: { status: TransactionStatus.CONFIRMED, txHash, confirmedAt: new Date() },
+        });
+        return db.user.findUnique({ where: { id: userId } });
+      });
+
+      const newBalance = new Decimal(updatedUser!.usdcBalance.toString()).toNumber();
+      notifyBalanceUpdated(userId, { usdcBalance: newBalance, reason: 'withdrawal', amountDelta: -amount });
+      notificationService.createNotification(
+        userId, NotificationType.SYSTEM,
+        'Withdrawal Successful', `${amount} USDC has been sent to your wallet`
+      ).catch(() => {});
+    } catch (err) {
+      logger.error('_processWithdrawAsync error', { userId, transactionId, err });
+      // Refund the reserved balance on failure
+      await prisma.$transaction(async (db) => {
+        await db.user.update({ where: { id: userId }, data: { usdcBalance: { increment: amount } } });
+        await db.transaction.update({
+          where: { id: transactionId },
+          data: { status: TransactionStatus.FAILED, failedReason: err instanceof Error ? err.message : 'Unknown error' },
+        });
+      }).catch(() => {});
+      notificationService.createNotification(
+        userId, NotificationType.SYSTEM,
+        'Withdrawal Failed', `Your withdrawal of ${amount} USDC failed. Your balance has been restored.`
+      ).catch(() => {});
+    }
+  }
+
+  // ==========================================================================
+  // DEPOSIT (existing two-step flow)
   // ==========================================================================
 
   /**
@@ -59,7 +293,7 @@ export class WalletService {
    * 4. User calls POST /api/wallet/deposit/confirm with the txHash
    */
   async initiateDeposit(userId: string): Promise<InitiateDepositResult> {
-    if (!PLATFORM_DEPOSIT_ADDRESS) {
+    if (!getPlatformDepositAddress()) {
       throw new ApiError(
         503,
         'DEPOSIT_UNAVAILABLE',
@@ -81,11 +315,11 @@ export class WalletService {
     logger.info('Deposit initiated', {
       userId,
       memo,
-      depositAddress: PLATFORM_DEPOSIT_ADDRESS,
+      depositAddress: getPlatformDepositAddress(),
     });
 
     return {
-      depositAddress: PLATFORM_DEPOSIT_ADDRESS,
+      depositAddress: getPlatformDepositAddress(),
       memo,
       expiresAt,
     };
@@ -155,7 +389,7 @@ export class WalletService {
         amountUsdc: 0,
         status: TransactionStatus.FAILED,
         fromAddress: user.walletAddress,
-        toAddress: PLATFORM_DEPOSIT_ADDRESS,
+        toAddress: getPlatformDepositAddress(),
         failedReason: depositVerification.reason,
       });
       throw new ApiError(
@@ -179,7 +413,7 @@ export class WalletService {
           status: TransactionStatus.CONFIRMED,
           txHash,
           fromAddress: user.walletAddress!,
-          toAddress: PLATFORM_DEPOSIT_ADDRESS,
+          toAddress: getPlatformDepositAddress(),
           confirmedAt: new Date(),
         },
         update: {
@@ -228,7 +462,7 @@ export class WalletService {
   }): Promise<{ valid: boolean; amount?: number; reason?: string }> {
     const { txHash, expectedSender, expectedMemo } = params;
 
-    if (!PLATFORM_DEPOSIT_ADDRESS) {
+    if (!getPlatformDepositAddress()) {
       return {
         valid: false,
         reason: 'Platform deposit address not configured',
@@ -273,7 +507,7 @@ export class WalletService {
         const payment = op as any;
         if (
           payment.type === 'payment' &&
-          payment.to === PLATFORM_DEPOSIT_ADDRESS &&
+          payment.to === getPlatformDepositAddress() &&
           payment.asset_code === 'USDC' &&
           payment.asset_issuer === USDC_ISSUER
         ) {
@@ -421,7 +655,7 @@ export class WalletService {
           amountUsdc: amount,
           status: TransactionStatus.CONFIRMED,
           txHash,
-          fromAddress: PLATFORM_DEPOSIT_ADDRESS || 'platform',
+          fromAddress: getPlatformDepositAddress() || 'platform',
           toAddress: user.walletAddress!,
           confirmedAt: new Date(),
         },

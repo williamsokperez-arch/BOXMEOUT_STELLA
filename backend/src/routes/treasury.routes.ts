@@ -45,6 +45,13 @@ const router: Router = Router();
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
  */
+router.post(
+  '/collect/:marketId',
+  requireAuth,
+  requireAdmin,
+  (req, res) => treasuryController.collectProtocolFees(req, res)
+);
+
 router.get('/balances', requireAuth, (req, res) =>
   treasuryController.getBalances(req, res)
 );

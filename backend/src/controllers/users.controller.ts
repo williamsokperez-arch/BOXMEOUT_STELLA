@@ -110,6 +110,18 @@ export class UsersController {
       return res.status(500).json({ success: false, message: 'Internal server error' });
     }
   }
+
+  async getMyAchievements(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    try {
+      const userId = req.user!.userId;
+      const { achievementService } = await import('../services/achievement.service.js');
+      const achievements = await achievementService.getUserAchievements(userId);
+      return res.status(200).json({ success: true, data: achievements });
+    } catch (error: any) {
+      logger.error('UsersController.getMyAchievements error', { error });
+      return res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+  }
 }
 
 export const usersController = new UsersController();

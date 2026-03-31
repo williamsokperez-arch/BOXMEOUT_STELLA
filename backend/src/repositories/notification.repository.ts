@@ -21,14 +21,22 @@ export class NotificationRepository extends BaseRepository<Notification> {
 
   async findByUserId(
     userId: string,
-    limit: number = 20
+    limit: number = 20,
+    offset: number = 0
   ): Promise<Notification[]> {
     return this.timedQuery('findByUserId', () =>
       this.prisma.notification.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
         take: limit,
+        skip: offset,
       })
+    );
+  }
+
+  async countByUserId(userId: string): Promise<number> {
+    return this.timedQuery('countByUserId', () =>
+      this.prisma.notification.count({ where: { userId } })
     );
   }
 

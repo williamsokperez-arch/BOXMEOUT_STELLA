@@ -14,6 +14,7 @@ describe('DisputeService Unit Tests', () => {
             updateStatus: vi.fn(),
             findByStatus: vi.fn(),
             findMany: vi.fn(),
+            findByMarketId: vi.fn().mockResolvedValue([]),
         };
         mockMarketRepository = {
             findById: vi.fn(),

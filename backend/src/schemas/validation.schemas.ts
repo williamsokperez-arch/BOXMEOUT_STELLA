@@ -74,6 +74,7 @@ export const registerBody = z.object({
   email: emailSchema,
   username: sanitizedString(3, 50),
   password: passwordSchema,
+  referralCode: z.string().optional(),
 });
 
 export const emailLoginBody = z.object({
@@ -245,6 +246,10 @@ export const attestBody = z.object({
   outcome: z.number().int().min(0).max(1),
 });
 
+export const resolveMarketBody = z.object({
+  outcome: z.number().int().min(0).max(1),
+});
+
 // --- Treasury schemas ---
 
 export const distributeLeaderboardBody = z.object({
@@ -373,4 +378,35 @@ export const getTransactionsQuery = z.object({
     .string()
     .datetime()
     .optional(),
+});
+
+// --- Predictions: POST /predictions body schema ---
+
+export const placePredictionBody = z.object({
+  marketId: z.string().uuid(),
+  outcomeId: z.number().int().min(0).max(1),
+  confidence: z
+    .number()
+    .positive('Confidence must be positive')
+    .max(1_000_000, 'Confidence exceeds maximum'),
+});
+
+// --- Predictions: GET /predictions query schema (issue #21) ---
+
+export const getUserPredictionsQuery = z.object({
+  status: z.enum(['pending', 'won', 'lost']).optional(),
+  page: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .refine((v) => v >= 1, 'page must be >= 1')
+    .optional()
+    .default('1'),
+  limit: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .refine((v) => v >= 1 && v <= 100, 'limit must be between 1 and 100')
+    .optional()
+    .default('20'),
 });

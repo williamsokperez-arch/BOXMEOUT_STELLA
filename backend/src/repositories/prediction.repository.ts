@@ -7,6 +7,30 @@ export class PredictionRepository extends BaseRepository<Prediction> {
     return 'prediction';
   }
 
+  /**
+   * Create a lightweight prediction record (no blockchain commitment).
+   * Used for tracking and leaderboard scoring.
+   */
+  async placePrediction(data: {
+    userId: string;
+    marketId: string;
+    outcomeId: number;
+    confidence: number;
+  }): Promise<Prediction> {
+    return this.timedQuery('placePrediction', () =>
+      this.prisma.prediction.create({
+        data: {
+          userId: data.userId,
+          marketId: data.marketId,
+          predictedOutcome: data.outcomeId,
+          amountUsdc: data.confidence,
+          commitmentHash: `track_${data.userId}_${data.marketId}_${Date.now()}`,
+          status: PredictionStatus.COMMITTED,
+        },
+      })
+    );
+  }
+
   async createPrediction(data: {
     userId: string;
     marketId: string;
@@ -104,6 +128,60 @@ export class PredictionRepository extends BaseRepository<Prediction> {
         },
       })
     );
+  }
+
+  /**
+   * Paginated user predictions with total count (issue #21)
+   */
+  async findUserPredictionsPaginated(
+    userId: string,
+    options: {
+      status?: 'pending' | 'won' | 'lost';
+      page: number;
+      limit: number;
+    }
+  ): Promise<{ predictions: any[]; total: number }> {
+    // Map issue status labels to PredictionStatus values
+    let where: any = { userId };
+    if (options.status === 'pending') {
+      where.status = { in: [PredictionStatus.COMMITTED, PredictionStatus.REVEALED] };
+    } else if (options.status === 'won') {
+      where.status = PredictionStatus.SETTLED;
+      where.isWinner = true;
+    } else if (options.status === 'lost') {
+      where.status = PredictionStatus.SETTLED;
+      where.isWinner = false;
+    }
+
+    const skip = (options.page - 1) * options.limit;
+
+    const [predictions, total] = await Promise.all([
+      this.timedQuery('findUserPredictionsPaginated', () =>
+        this.prisma.prediction.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: options.limit,
+          include: {
+            market: {
+              select: {
+                id: true,
+                title: true,
+                outcomeA: true,
+                outcomeB: true,
+                category: true,
+                status: true,
+              },
+            },
+          },
+        })
+      ),
+      this.timedQuery('countUserPredictions', () =>
+        this.prisma.prediction.count({ where })
+      ),
+    ]);
+
+    return { predictions, total };
   }
 
   async findMarketPredictions(marketId: string): Promise<Prediction[]> {

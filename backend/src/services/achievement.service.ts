@@ -203,12 +203,18 @@ async function checkWinStreak(userId: string, n: number): Promise<boolean> {
 // ACHIEVEMENT SERVICE
 // ============================================================================
 
+export type AchievementEvent =
+  | 'first_trade'
+  | 'prediction_settled'
+  | 'referral_converted'
+  | 'trade_completed';
+
 export class AchievementService {
   /**
-   * Run all achievement checks for a user after a prediction is settled.
+   * Run all achievement checks for a user after a relevant event.
    * Already-awarded achievements are skipped (idempotent via unique constraint).
    */
-  async checkAndAward(userId: string): Promise<void> {
+  async checkAndAward(userId: string, _event?: AchievementEvent): Promise<void> {
     try {
       // Fetch already-awarded achievement names for this user
       const existing = await prisma.achievement.findMany({

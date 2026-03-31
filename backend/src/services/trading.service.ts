@@ -11,6 +11,11 @@ import { ApiError } from '../middleware/error.middleware.js';
 
 const tradeRepository = new TradeRepository();
 
+interface QuoteCacheEntry {
+  result: any;
+  timestamp: number;
+}
+
 interface BuySharesParams {
   userId: string;
   marketId: string;
@@ -61,6 +66,62 @@ interface MarketOddsResult {
 }
 
 export class TradingService {
+  private quoteCache: Map<string, QuoteCacheEntry> = new Map();
+  private readonly CACHE_TTL_MS = 2000; // 2 seconds
+
+  /**
+   * Get a read-only quote for a buy/sell trade
+   */
+  async getQuote(params: {
+    marketId: string;
+    outcome: number;
+    amount: number;
+    side: 'buy' | 'sell';
+  }): Promise<any> {
+    const { marketId, outcome, amount, side } = params;
+    const cacheKey = `${marketId}-${outcome}-${amount}-${side}`;
+    
+    // Check cache
+    const cached = this.quoteCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+      return cached.result;
+    }
+
+    const isBuy = side === 'buy';
+    
+    try {
+      const quote = await ammService.getTradeQuote({
+        marketId,
+        outcome,
+        amount,
+        isBuy,
+      });
+
+      const result = {
+        [isBuy ? 'sharesOut' : 'collateralOut']: quote.sharesReceived,
+        avgPriceBps: Math.round(quote.pricePerUnit * 10000),
+        priceImpactBps: quote.priceImpactBps,
+        totalFees: quote.feeAmount,
+      };
+      
+      // Save to cache
+      this.quoteCache.set(cacheKey, {
+        result,
+        timestamp: Date.now(),
+      });
+
+      // Cleanup old cache entries (simple logic)
+      if (this.quoteCache.size > 1000) {
+        this.quoteCache.clear();
+      }
+
+      return result;
+    } catch (error) {
+      // Don't cache errors
+      throw error;
+    }
+  }
+
   /**
    * Build unsigned transaction for buying shares
    */
@@ -233,7 +294,7 @@ export class TradingService {
       };
     });
 
-    return {
+    const buyResult2 = {
       sharesBought: buyResult.sharesReceived,
       pricePerUnit: buyResult.pricePerUnit,
       totalCost: buyResult.totalCost,
@@ -246,6 +307,28 @@ export class TradingService {
           Number(result.share.costBasis) / Number(result.share.quantity),
       },
     };
+
+    // Fire-and-forget: referral first-trade reward + achievement check
+    Promise.all([
+      import('./referral.service.js').then(({ referralService }) =>
+        referralService.onFirstTrade(userId)
+      ),
+      import('./achievement.service.js').then(({ achievementService }) =>
+        achievementService.checkAndAward(userId, 'first_trade')
+      ),
+    ]).catch(() => {});
+
+    // Emit real-time price update to market subscribers
+    import('../websocket/realtime.js').then(({ emitPriceUpdate }) => {
+      emitPriceUpdate(
+        marketId,
+        outcome,
+        Math.round(buyResult.pricePerUnit * 10000),
+        buyResult.totalCost
+      );
+    }).catch(() => {});
+
+    return buyResult2;
   }
 
   /**
@@ -505,6 +588,50 @@ export class TradingService {
     const odds = await ammService.getOdds(marketId);
 
     return odds;
+  }
+
+  /**
+   * Get paginated trade history for a user
+   */
+  async getUserTradeHistory(
+    userId: string,
+    params: { page: number; limit: number; outcomeId?: number }
+  ) {
+    const skip = (params.page - 1) * params.limit;
+    const { trades, total } = await tradeRepository.findUserTrades(userId, {
+      skip,
+      take: params.limit,
+      outcome: params.outcomeId,
+    });
+
+    return {
+      data: trades,
+      total,
+      page: params.page,
+      limit: params.limit,
+    };
+  }
+
+  /**
+   * Get paginated trade history for a market
+   */
+  async getMarketTradeHistory(
+    marketId: string,
+    params: { page: number; limit: number; outcomeId?: number }
+  ) {
+    const skip = (params.page - 1) * params.limit;
+    const { trades, total } = await tradeRepository.findMarketTrades(marketId, {
+      skip,
+      take: params.limit,
+      outcome: params.outcomeId,
+    });
+
+    return {
+      data: trades,
+      total,
+      page: params.page,
+      limit: params.limit,
+    };
   }
 }
 
