@@ -15,7 +15,7 @@ interface BetHistoryTableProps {
 /**
  * Table of bets, typically shown on the Portfolio page.
  *
- * Columns: Market ID | Side | Amount (XLM) | Status | Payout (XLM) | Action
+ * Columns: Market | Side | Amount (XLM) | Status | Payout (XLM) | Action
  *
  * Action column rules:
  *   - Bet is on winning side + unclaimed  → show "Claim" button
@@ -32,7 +32,7 @@ export function BetHistoryTable({
   onRefund,
 }: BetHistoryTableProps): JSX.Element {
   if (bets.length === 0) {
-    return <p className="text-gray-500 text-sm text-center py-6">No bets to show.</p>;
+    return <p className="text-gray-500 text-sm text-center py-6">No bets yet.</p>;
   }
 
   return (
@@ -42,9 +42,9 @@ export function BetHistoryTable({
           <tr className="text-xs text-gray-500 border-b border-gray-800">
             <th className="pb-2 pr-4 whitespace-nowrap">Market</th>
             <th className="pb-2 pr-4 whitespace-nowrap">Side</th>
-            <th className="pb-2 pr-4 whitespace-nowrap">Amount</th>
+            <th className="pb-2 pr-4 whitespace-nowrap">Amount (XLM)</th>
             <th className="pb-2 pr-4 whitespace-nowrap">Status</th>
-            <th className="pb-2 pr-4 whitespace-nowrap">Payout</th>
+            <th className="pb-2 pr-4 whitespace-nowrap">Payout (XLM)</th>
             <th className="pb-2 whitespace-nowrap">Action</th>
           </tr>
         </thead>
@@ -64,7 +64,7 @@ export function BetHistoryTable({
                   Claim
                 </button>
               );
-            } else if (payout === 0) {
+            } else if (payout != null && payout < 0) {
               action = (
                 <button
                   onClick={() => onRefund(bet.market_id)}
@@ -73,6 +73,8 @@ export function BetHistoryTable({
                   Refund
                 </button>
               );
+            } else if (payout === 0) {
+              action = <span className="text-gray-500">—</span>;
             } else {
               action = <span className="text-gray-500">Pending</span>;
             }
@@ -82,7 +84,14 @@ export function BetHistoryTable({
                 <td className="py-3 pr-4 font-mono text-xs whitespace-nowrap">{bet.market_id.slice(0, 8)}…</td>
                 <td className="py-3 pr-4 capitalize whitespace-nowrap">{bet.side.replace('_', ' ')}</td>
                 <td className="py-3 pr-4 whitespace-nowrap">{bet.amount_xlm} XLM</td>
-                <td className="py-3 pr-4 whitespace-nowrap">{bet.claimed ? 'Claimed' : payout != null ? (payout > 0 ? 'Won' : 'Lost') : 'Active'}</td>
+                <td className="py-3 pr-4 whitespace-nowrap">
+                  {bet.claimed 
+                    ? 'Claimed' 
+                    : payout != null 
+                      ? (payout > 0 ? 'Won' : payout < 0 ? 'Cancelled' : 'Lost') 
+                      : 'Active'
+                  }
+                </td>
                 <td className="py-3 pr-4 whitespace-nowrap">{payout != null ? `${payout.toFixed(2)} XLM` : '—'}</td>
                 <td className="py-3 whitespace-nowrap">{action}</td>
               </tr>
