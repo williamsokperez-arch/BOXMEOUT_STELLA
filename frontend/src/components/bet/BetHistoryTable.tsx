@@ -2,6 +2,7 @@
 // BOXMEOUT — BetHistoryTable Component
 // ============================================================
 
+import { stellarExplorerUrl } from '../../services/wallet';
 import type { Bet } from '../../types';
 
 interface BetHistoryTableProps {
@@ -80,8 +81,18 @@ export function BetHistoryTable({
             }
 
             return (
-              <tr key={bet.tx_hash} className="border-b border-gray-800/50">
-                <td className="py-3 pr-4 font-mono text-xs whitespace-nowrap">{bet.market_id.slice(0, 8)}…</td>
+              <tr key={bet.tx_hash} className="border-b border-gray-800/50 group">
+                <td className="py-3 pr-4 font-mono text-xs whitespace-nowrap">
+                  <a
+                    href={stellarExplorerUrl('tx', bet.tx_hash)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-amber-400 hover:text-amber-300 hover:underline"
+                    title={bet.tx_hash}
+                  >
+                    {bet.market_id.slice(0, 8)}…
+                  </a>
+                </td>
                 <td className="py-3 pr-4 capitalize whitespace-nowrap">{bet.side.replace('_', ' ')}</td>
                 <td className="py-3 pr-4 whitespace-nowrap">{bet.amount_xlm} XLM</td>
                 <td className="py-3 pr-4 whitespace-nowrap">

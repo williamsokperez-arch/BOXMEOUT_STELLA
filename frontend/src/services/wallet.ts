@@ -306,3 +306,11 @@ export function xlmToStroops(xlm: number): bigint {
 export function stroopsToXlm(stroops: bigint | string): number {
   return Number(BigInt(stroops)) / 10_000_000;
 }
+
+export function stellarExplorerUrl(
+  type: 'tx' | 'account' | 'contract',
+  id: string,
+): string {
+  const network = NETWORK === 'mainnet' ? 'public' : 'testnet';
+  return `https://stellar.expert/explorer/${network}/${type}/${id}`;
+}

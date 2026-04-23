@@ -24,6 +24,10 @@ export interface Market {
   odds_b: number;
   odds_draw: number;
   fee_bps: number;
+  /** Oracle address that submitted result (if resolved) */
+  oracle_address?: string;
+  /** Transaction hash of resolution (if resolved) */
+  resolution_tx_hash?: string;
 }
 
 export type MarketStatus =

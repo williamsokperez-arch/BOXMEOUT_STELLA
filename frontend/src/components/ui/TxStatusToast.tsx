@@ -2,13 +2,12 @@
 
 import { useEffect } from 'react';
 import type { TxStatus } from '../../types';
+import { stellarExplorerUrl } from '../../services/wallet';
 
 interface TxStatusToastProps {
   txStatus: TxStatus;
   onDismiss: () => void;
 }
-
-const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK === 'mainnet' ? 'public' : 'testnet';
 
 export function TxStatusToast({ txStatus, onDismiss }: TxStatusToastProps): JSX.Element {
   useEffect(() => {
@@ -34,7 +33,7 @@ export function TxStatusToast({ txStatus, onDismiss }: TxStatusToastProps): JSX.
             <p className="font-semibold">Bet placed!</p>
             {txStatus.hash && (
               <a
-                href={`https://stellar.expert/explorer/${NETWORK}/tx/${txStatus.hash}`}
+                href={stellarExplorerUrl('tx', txStatus.hash)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-amber-400 underline break-all"

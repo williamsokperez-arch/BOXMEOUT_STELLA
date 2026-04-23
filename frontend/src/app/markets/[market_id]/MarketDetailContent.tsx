@@ -6,6 +6,7 @@ import { MarketOddsBar } from '../../../components/market/MarketOddsBar';
 import { MarketStatusBadge } from '../../../components/market/MarketStatusBadge';
 import { CountdownTimer } from '../../../components/ui/CountdownTimer';
 import { BetPanel } from '../../../components/bet/BetPanel';
+import { stellarExplorerUrl } from '../../../services/wallet';
 
 export default function MarketDetailContent({ market_id }: { market_id: string }): JSX.Element {
   const { market, isLoading, error } = useMarket(market_id);
@@ -76,8 +77,36 @@ export default function MarketDetailContent({ market_id }: { market_id: string }
 
       {/* Oracle info — shown after resolved */}
       {market.status === 'resolved' && market.outcome && (
-        <div className="bg-gray-900 rounded-xl p-4 text-sm space-y-1">
-          <p className="text-gray-400">Outcome: <span className="text-white font-semibold capitalize">{market.outcome.replace('_', ' ')}</span></p>
+        <div className="bg-gray-900 rounded-xl p-4 text-sm space-y-3">
+          <div>
+            <p className="text-gray-400">Outcome: <span className="text-white font-semibold capitalize">{market.outcome.replace('_', ' ')}</span></p>
+          </div>
+          {market.oracle_address && (
+            <div>
+              <p className="text-gray-400">Oracle: </p>
+              <a
+                href={stellarExplorerUrl('account', market.oracle_address)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-amber-400 hover:text-amber-300 underline font-mono text-xs break-all"
+              >
+                {market.oracle_address.slice(0, 16)}…
+              </a>
+            </div>
+          )}
+          {market.resolution_tx_hash && (
+            <div>
+              <p className="text-gray-400">Resolution TX: </p>
+              <a
+                href={stellarExplorerUrl('tx', market.resolution_tx_hash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-amber-400 hover:text-amber-300 underline font-mono text-xs break-all"
+              >
+                {market.resolution_tx_hash.slice(0, 16)}…
+              </a>
+            </div>
+          )}
         </div>
       )}
     </main>
