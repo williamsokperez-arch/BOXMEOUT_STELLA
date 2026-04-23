@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { BetSide } from '../../types';
 
@@ -22,13 +22,38 @@ const SIDE_LABEL: Record<BetSide, (a: string, b: string) => string> = {
   draw: () => 'Draw',
 };
 
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export function BetConfirmModal({
   isOpen, fighter_a, fighter_b, side, amount_xlm, estimated_payout_xlm, fee_bps, onConfirm, onCancel,
 }: BetConfirmModalProps): JSX.Element {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCancel();
+
+    // Escape key
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onCancel(); return; }
+      // Focus trap
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+
     window.addEventListener('keydown', onKey);
+
+    // Move focus into modal on open
+    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE);
+    firstFocusable?.focus();
+
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, onCancel]);
 
@@ -41,16 +66,20 @@ export function BetConfirmModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={onCancel}
+      aria-modal="true"
+      role="dialog"
+      aria-labelledby="bet-confirm-title"
     >
       <div
+        ref={dialogRef}
         className="bg-gray-900 rounded-xl p-6 w-full max-w-sm mx-4 space-y-4 text-white"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-bold">Confirm Bet</h2>
+        <h2 id="bet-confirm-title" className="text-lg font-bold">Confirm your bet</h2>
         <dl className="space-y-2 text-sm">
           <div className="flex justify-between"><dt className="text-gray-400">Fighter</dt><dd>{chosen}</dd></div>
           <div className="flex justify-between"><dt className="text-gray-400">Amount</dt><dd>{amount_xlm} XLM</dd></div>
-          <div className="flex justify-between"><dt className="text-gray-400">Platform fee ({fee_bps / 100}%)</dt><dd>{feeXlm.toFixed(4)} XLM</dd></div>
+          <div className="flex justify-between"><dt className="text-gray-400">Fee</dt><dd>{feeXlm.toFixed(2)} XLM</dd></div>
           <div className="flex justify-between font-semibold"><dt className="text-gray-400">Est. payout</dt><dd>{estimated_payout_xlm.toFixed(4)} XLM</dd></div>
         </dl>
         <div className="flex gap-3 pt-2">
