@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Market } from '../types';
 import type { MarketFilters } from '../services/api';
+import { fetchMarkets } from '../services/api';
 
 export interface UseMarketsResult {
   markets: Market[];
@@ -26,8 +27,41 @@ export interface UseMarketsResult {
  * to avoid layout flash — use a subtle spinner instead).
  */
 export function useMarkets(filters?: MarketFilters): UseMarketsResult {
-  // TODO: implement
-  // Hint: use useEffect + setInterval for polling
-  //       use useCallback for the refetch function
-  //       clean up interval in useEffect return
+  const [markets, setMarkets] = useState<Market[]>([]);
+  const [total, setTotal] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchAndUpdate = useCallback(async () => {
+    try {
+      const response = await fetchMarkets(filters);
+      setMarkets(response.markets);
+      setTotal(response.total);
+      setError(null);
+      setIsLoading(false);
+    } catch (e) {
+      setError(e as Error);
+      setIsLoading(false);
+    }
+  }, [filters]);
+
+  const refetch = useCallback(() => {
+    fetchAndUpdate();
+  }, [fetchAndUpdate]);
+
+  useEffect(() => {
+    // Initial fetch
+    fetchAndUpdate();
+
+    // Set up polling interval every 30 seconds
+    const intervalId = setInterval(() => {
+      fetchAndUpdate();
+    }, 30_000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [fetchAndUpdate]);
+
+  return { markets, total, isLoading, error, refetch };
 }

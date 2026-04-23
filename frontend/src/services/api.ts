@@ -48,7 +48,28 @@ export async function fetchMarkets(
   filters?: MarketFilters,
   pagination?: PaginationParams,
 ): Promise<MarketListResponse> {
-  // TODO: implement
+  const url = new URL(`${API_BASE}/api/markets`);
+  
+  if (filters?.status) {
+    url.searchParams.append('status', filters.status);
+  }
+  if (filters?.weight_class) {
+    url.searchParams.append('weight_class', filters.weight_class);
+  }
+  if (pagination?.page) {
+    url.searchParams.append('page', pagination.page.toString());
+  }
+  if (pagination?.limit) {
+    url.searchParams.append('limit', pagination.limit.toString());
+  }
+
+  try {
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new NetworkError(`Unexpected response: ${res.status}`);
+    return res.json();
+  } catch (e) {
+    throw new NetworkError((e as Error).message);
+  }
 }
 
 /**
